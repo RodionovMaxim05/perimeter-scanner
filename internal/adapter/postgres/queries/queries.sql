@@ -1,8 +1,8 @@
--- GetSeverityIDByName returns the ID of a severity given its name
--- name: GetSeverityIDByName :one
-SELECT id
-FROM severities
-WHERE name = $1;
+-- ListSeverities returns all severities
+-- name: ListSeverities :many
+SELECT id,
+    name
+FROM severities;
 
 -- GetLastHostScan returns the most recent scan record for a given IP
 -- name: GetLastHostScan :one
@@ -27,19 +27,26 @@ SELECT id,
 FROM scan_services
 WHERE host_scan_id = $1;
 
--- GetVulnerabilitiesByServiceID returns all CVEs linked to a specific service
--- name: GetVulnerabilitiesByServiceID :many
-SELECT v.id,
+-- GetServicesWithVulnerabilities returns all services with vulnerabilities
+-- name: GetServicesWithVulnerabilities :many
+SELECT s.id AS service_id,
+    s.port,
+    s.proto,
+    s.service,
+    s.banner,
+    s.version,
+    s.cpe,
     v.cve,
     v.score,
-    s.name AS severity,
+    sev.name AS severity,
     v.description,
     v.exploit_available,
     v.link
-FROM vulnerabilities v
-    JOIN severities s ON v.severity_id = s.id
-    JOIN scan_service_vulns sv ON sv.vulnerability_id = v.id
-WHERE sv.service_id = $1;
+FROM scan_services s
+    LEFT JOIN scan_service_vulns sv ON s.id = sv.service_id
+    LEFT JOIN vulnerabilities v ON sv.vulnerability_id = v.id
+    LEFT JOIN severities sev ON v.severity_id = sev.id
+WHERE s.host_scan_id = $1;
 
 -- CreateHostScan inserts a new scan record for a host and returns its ID
 -- name: CreateHostScan :one
