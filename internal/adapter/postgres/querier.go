@@ -18,12 +18,12 @@ type Querier interface {
 	GetLastHostScan(ctx context.Context, ip netip.Addr) (HostScan, error)
 	// GetServicesByScanID returns all open ports discovered during a specific scan
 	GetServicesByScanID(ctx context.Context, hostScanID int32) ([]ScanService, error)
-	// GetSeverityIDByName returns the ID of a severity given its name
-	GetSeverityIDByName(ctx context.Context, name string) (int32, error)
-	// GetVulnerabilitiesByServiceID returns all CVEs linked to a specific service
-	GetVulnerabilitiesByServiceID(ctx context.Context, serviceID int32) ([]GetVulnerabilitiesByServiceIDRow, error)
+	// GetServicesWithVulnerabilities returns all services with vulnerabilities
+	GetServicesWithVulnerabilities(ctx context.Context, hostScanID int32) ([]GetServicesWithVulnerabilitiesRow, error)
 	// LinkServiceVuln creates a many-to-many link between a service and a CVE
 	LinkServiceVuln(ctx context.Context, arg LinkServiceVulnParams) error
+	// ListSeverities returns all severities
+	ListSeverities(ctx context.Context) ([]Severity, error)
 	// UpsertVulnerability inserts a new CVE or updates it if it already exists
 	UpsertVulnerability(ctx context.Context, arg UpsertVulnerabilityParams) (int32, error)
 }

@@ -132,56 +132,61 @@ func (q *Queries) GetServicesByScanID(ctx context.Context, hostScanID int32) ([]
 	return items, nil
 }
 
-const getSeverityIDByName = `-- name: GetSeverityIDByName :one
-SELECT id
-FROM severities
-WHERE name = $1
-`
-
-// GetSeverityIDByName returns the ID of a severity given its name
-func (q *Queries) GetSeverityIDByName(ctx context.Context, name string) (int32, error) {
-	row := q.db.QueryRow(ctx, getSeverityIDByName, name)
-	var id int32
-	err := row.Scan(&id)
-	return id, err
-}
-
-const getVulnerabilitiesByServiceID = `-- name: GetVulnerabilitiesByServiceID :many
-SELECT v.id,
+const getServicesWithVulnerabilities = `-- name: GetServicesWithVulnerabilities :many
+SELECT s.id AS service_id,
+    s.port,
+    s.proto,
+    s.service,
+    s.banner,
+    s.version,
+    s.cpe,
     v.cve,
     v.score,
-    s.name AS severity,
+    sev.name AS severity,
     v.description,
     v.exploit_available,
     v.link
-FROM vulnerabilities v
-    JOIN severities s ON v.severity_id = s.id
-    JOIN scan_service_vulns sv ON sv.vulnerability_id = v.id
-WHERE sv.service_id = $1
+FROM scan_services s
+    LEFT JOIN scan_service_vulns sv ON s.id = sv.service_id
+    LEFT JOIN vulnerabilities v ON sv.vulnerability_id = v.id
+    LEFT JOIN severities sev ON v.severity_id = sev.id
+WHERE s.host_scan_id = $1
 `
 
-type GetVulnerabilitiesByServiceIDRow struct {
-	ID               int32
-	Cve              string
+type GetServicesWithVulnerabilitiesRow struct {
+	ServiceID        int32
+	Port             int32
+	Proto            string
+	Service          pgtype.Text
+	Banner           pgtype.Text
+	Version          pgtype.Text
+	Cpe              pgtype.Text
+	Cve              pgtype.Text
 	Score            pgtype.Numeric
-	Severity         string
+	Severity         pgtype.Text
 	Description      pgtype.Text
-	ExploitAvailable bool
+	ExploitAvailable pgtype.Bool
 	Link             pgtype.Text
 }
 
-// GetVulnerabilitiesByServiceID returns all CVEs linked to a specific service
-func (q *Queries) GetVulnerabilitiesByServiceID(ctx context.Context, serviceID int32) ([]GetVulnerabilitiesByServiceIDRow, error) {
-	rows, err := q.db.Query(ctx, getVulnerabilitiesByServiceID, serviceID)
+// GetServicesWithVulnerabilities returns all services with vulnerabilities
+func (q *Queries) GetServicesWithVulnerabilities(ctx context.Context, hostScanID int32) ([]GetServicesWithVulnerabilitiesRow, error) {
+	rows, err := q.db.Query(ctx, getServicesWithVulnerabilities, hostScanID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetVulnerabilitiesByServiceIDRow
+	var items []GetServicesWithVulnerabilitiesRow
 	for rows.Next() {
-		var i GetVulnerabilitiesByServiceIDRow
+		var i GetServicesWithVulnerabilitiesRow
 		if err := rows.Scan(
-			&i.ID,
+			&i.ServiceID,
+			&i.Port,
+			&i.Proto,
+			&i.Service,
+			&i.Banner,
+			&i.Version,
+			&i.Cpe,
 			&i.Cve,
 			&i.Score,
 			&i.Severity,
@@ -213,6 +218,33 @@ type LinkServiceVulnParams struct {
 func (q *Queries) LinkServiceVuln(ctx context.Context, arg LinkServiceVulnParams) error {
 	_, err := q.db.Exec(ctx, linkServiceVuln, arg.ServiceID, arg.VulnerabilityID)
 	return err
+}
+
+const listSeverities = `-- name: ListSeverities :many
+SELECT id,
+    name
+FROM severities
+`
+
+// ListSeverities returns all severities
+func (q *Queries) ListSeverities(ctx context.Context) ([]Severity, error) {
+	rows, err := q.db.Query(ctx, listSeverities)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Severity
+	for rows.Next() {
+		var i Severity
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertVulnerability = `-- name: UpsertVulnerability :one
