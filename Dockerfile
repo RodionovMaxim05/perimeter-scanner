@@ -23,4 +23,6 @@ WORKDIR /app
 
 COPY --from=builder /app/scanner .
 
+COPY config/config.yaml ./config/config.yaml
+
 ENTRYPOINT ["./scanner", "-config", "config/config.yaml"]
