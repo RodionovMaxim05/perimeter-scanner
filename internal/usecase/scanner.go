@@ -139,7 +139,7 @@ func (suc *ScannerUseCase) enrichHostsParallel(ctx context.Context, hosts []doma
 					suc.logger.Error("Enrichment failed for host", "ip", host.IP, "error", err)
 				}
 
-				suc.enrichExploits(ctx, &host)
+				suc.enrichExploitsBatch(ctx, &host)
 
 				resultsChan <- host
 			}
@@ -161,19 +161,35 @@ func (suc *ScannerUseCase) enrichHostsParallel(ctx context.Context, hosts []doma
 	return enrichedHosts
 }
 
-// enrichExploits checks all host vulnerabilities for a public exploit.
-func (suc *ScannerUseCase) enrichExploits(ctx context.Context, host *domain.HostScanResult) {
+// enrichExploitsBatch queries the exploit checker service in a single batch request
+// for all unique CVEs identified on the host, updating their exploit availability status.
+func (suc *ScannerUseCase) enrichExploitsBatch(ctx context.Context, host *domain.HostScanResult) {
+	cveSet := make(map[string]struct{})
+	for _, svc := range host.Services {
+		for _, vuln := range svc.Vulnerabilities {
+			cveSet[vuln.CVE] = struct{}{}
+		}
+	}
+
+	if len(cveSet) == 0 {
+		return
+	}
+
+	cveIDs := make([]string, 0, len(cveSet))
+	for cve := range cveSet {
+		cveIDs = append(cveIDs, cve)
+	}
+
+	exploitMap, err := suc.exploitChecker.CheckExploits(ctx, cveIDs)
+	if err != nil {
+		suc.logger.Error("Failed to check exploit status in batch", "cve_count", len(cveIDs), "error", err)
+		return
+	}
+
 	for sIdx := range host.Services {
 		for vIdx := range host.Services[sIdx].Vulnerabilities {
-			cveID := host.Services[sIdx].Vulnerabilities[vIdx].CVE
-
-			hasExploit, err := suc.exploitChecker.CheckExploit(ctx, cveID)
-			if err != nil {
-				suc.logger.Error("Failed to check exploit status", "cve", cveID, "error", err)
-				continue
-			}
-
-			host.Services[sIdx].Vulnerabilities[vIdx].ExploitAvailable = hasExploit
+			cve := host.Services[sIdx].Vulnerabilities[vIdx].CVE
+			host.Services[sIdx].Vulnerabilities[vIdx].ExploitAvailable = exploitMap[cve]
 		}
 	}
 }

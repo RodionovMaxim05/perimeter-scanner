@@ -16,8 +16,9 @@ type ServiceEnricher interface {
 
 // ExploitChecker defines a contract for checking public exploit availability for a CVE.
 type ExploitChecker interface {
-	// CheckExploit reports whether a publicly known exploit exists for the given CVE ID.
-	CheckExploit(ctx context.Context, cveID string) (bool, error)
+	// CheckExploits reports exploit availability for a batch of CVE IDs at once.
+	// The returned map contains an entry for every CVE that was found in Vulners.
+	CheckExploits(ctx context.Context, cveIDs []string) (map[string]bool, error)
 }
 
 // ResultRepository is responsible for storing history and retrieving past results
