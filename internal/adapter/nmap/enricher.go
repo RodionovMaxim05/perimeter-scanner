@@ -98,29 +98,33 @@ func (a *EnricherAdapter) parseVulnersScript(scripts []nmap.Script) []domain.Vul
 
 		for _, table := range script.Tables {
 			for _, vulnTable := range table.Tables {
-				var v domain.Vulnerability
+				var idVal, typeVal, cvssVal string
 
 				for _, element := range vulnTable.Elements {
 					switch element.Key {
-					case "type":
-						if element.Value != "cve" {
-							// Skip non-CVE identifiers (EDB-ID, PACKETSTORM, MSF, etc.)
-							v.CVE = "" // reset in case the id has already been read
-						}
 					case "id":
-						v.CVE = element.Value
-					case "cvss": // Score
-						score, _ := strconv.ParseFloat(element.Value, 64)
-						v.Score = score
-						v.Severity = mapScoreToSeverity(score)
+						idVal = element.Value
+					case "type":
+						typeVal = element.Value
+					case "cvss":
+						cvssVal = element.Value
 					}
 				}
 
-				if v.CVE == "" {
+				// Skip non-CVE identifiers (EDB-ID, PACKETSTORM, MSF, etc.)
+				if typeVal != "cve" || idVal == "" {
 					continue
 				}
 
-				v.Link = fmt.Sprintf("https://vulners.com/cve/%s", v.CVE)
+				score, _ := strconv.ParseFloat(cvssVal, 64)
+
+				v := domain.Vulnerability{
+					CVE:      idVal,
+					Score:    score,
+					Severity: mapScoreToSeverity(score),
+					Link:     fmt.Sprintf("https://vulners.com/cve/%s", idVal),
+				}
+
 				vulns = append(vulns, v)
 			}
 		}
