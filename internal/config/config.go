@@ -8,7 +8,8 @@ import (
 )
 
 type Application struct {
-	WorkerCount int `yaml:"worker_count" env:"WORKER_COUNT" env-default:"10"`
+	ScanInterval int `yaml:"scan_interval" env:"SCAN_INTERVAL" env-default:"300"`
+	WorkerCount  int `yaml:"worker_count" env:"WORKER_COUNT" env-default:"10"`
 }
 
 type Scanner struct {
