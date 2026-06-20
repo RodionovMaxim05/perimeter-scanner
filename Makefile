@@ -7,10 +7,15 @@ GOLANGCI_LINT := $(GOBIN)/golangci-lint
 
 GOLANGCI_LINT_VERSION := v2.12.2
 
-.PHONY: fmt lint tools
+.PHONY: fmtcheck lint tools
 
-fmt:
-	$(GOIMPORTS) -w .
+fmtcheck:
+	@files="$$($(GOIMPORTS) -l .)"; \
+	if [ -n "$$files" ]; then \
+		echo "Files need formatting:"; \
+		echo "$$files"; \
+		exit 1; \
+	fi
 
 lint:
 	$(GOLANGCI_LINT) run --timeout=2m -E gocritic -v ./...
