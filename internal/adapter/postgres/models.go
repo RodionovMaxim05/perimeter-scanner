@@ -36,7 +36,6 @@ type Vulnerability struct {
 	ID               int32
 	Cve              string
 	Score            pgtype.Numeric
-	Description      pgtype.Text
 	ExploitAvailable bool
 	Link             pgtype.Text
 }

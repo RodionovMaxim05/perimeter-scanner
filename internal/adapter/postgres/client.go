@@ -85,7 +85,6 @@ func buildServicesFromRows(rows []GetServicesWithVulnerabilitiesRow) []domain.Se
 		svc.Vulnerabilities = append(svc.Vulnerabilities, domain.Vulnerability{
 			CVE:              row.Cve.String,
 			Score:            score.Float64,
-			Description:      row.Description.String,
 			ExploitAvailable: row.ExploitAvailable.Bool,
 			Link:             row.Link.String,
 		})
@@ -100,7 +99,7 @@ func buildServicesFromRows(rows []GetServicesWithVulnerabilitiesRow) []domain.Se
 
 // SaveResult persists a full host scan result in a single transaction.
 // Vulnerabilities are upserted so the catalog stays up-to-date when scores
-// or descriptions change between scans.
+// change between scans.
 func (ra *RepositoryAdapter) SaveResult(ctx context.Context, result domain.HostScanResult) error {
 	parsedIP, err := netip.ParseAddr(result.IP)
 	if err != nil {
@@ -171,7 +170,6 @@ func (ra *RepositoryAdapter) saveScanService(
 		vulnID, err := qtx.UpsertVulnerability(ctx, UpsertVulnerabilityParams{
 			Cve:              vuln.CVE,
 			Score:            scoreNumeric,
-			Description:      pgtype.Text{String: vuln.Description, Valid: vuln.Description != ""},
 			ExploitAvailable: vuln.ExploitAvailable,
 			Link:             pgtype.Text{String: vuln.Link, Valid: vuln.Link != ""},
 		})

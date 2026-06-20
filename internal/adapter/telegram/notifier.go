@@ -34,9 +34,10 @@ func NewNotifierAdapter(token, chatID string) *NotifierAdapter {
 
 // telegramMessage is the JSON payload for the Telegram sendMessage endpoint.
 type telegramMessage struct {
-	ChatID    string `json:"chat_id"`
-	Text      string `json:"text"`
-	ParseMode string `json:"parse_mode"`
+	ChatID                string `json:"chat_id"`
+	Text                  string `json:"text"`
+	ParseMode             string `json:"parse_mode"`
+	DisableWebPagePreview bool   `json:"disable_web_page_preview"`
 }
 
 // SendDiffAlert formats the scan diff as a MarkdownV2 message and sends it
@@ -61,9 +62,10 @@ func (n *NotifierAdapter) sendMessage(ctx context.Context, text string) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.token)
 
 	reqBody, err := json.Marshal(telegramMessage{
-		ChatID:    n.chatID,
-		Text:      text,
-		ParseMode: "MarkdownV2",
+		ChatID:                n.chatID,
+		Text:                  text,
+		ParseMode:             "MarkdownV2",
+		DisableWebPagePreview: true,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal telegram message: %w", err)
@@ -126,41 +128,51 @@ func (n *NotifierAdapter) buildMarkdownMessage(diff domain.ScanDiff) string {
 	var sb strings.Builder
 
 	sb.WriteString("🔔 *ОБНАРУЖЕНЫ ИЗМЕНЕНИЯ ПЕРИМЕТРА*\n\n")
-	fmt.Fprintf(&sb, "🌐 *Хост:* `%s`\n", n.escape(diff.IP))
-	fmt.Fprintf(&sb, "🕒 *Время фиксации:* %s\n\n", n.escape(time.Now().Format("2006-01-02 15:04:05")))
+	fmt.Fprintf(&sb, "🌐 *Хост:* `%s`\n", escapeMarkdownV2(diff.IP))
+	fmt.Fprintf(&sb, "🕒 *Время фиксации:* %s\n\n", escapeMarkdownV2(diff.ScanTime.Format("2006-01-02 15:04:05")))
 
 	sb.WriteString("🚀 *Новые открытые сервисы:*\n")
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n")
 
 	for _, svc := range diff.NewServices {
-		fmt.Fprintf(&sb, "• *%d/%s* ➔ _%s_ ", svc.Port, n.escape(svc.Proto), n.escape(svc.Service))
+		fmt.Fprintf(&sb, "• *%d/%s* ➔ _%s_ ", svc.Port, escapeMarkdownV2(svc.Proto), escapeMarkdownV2(svc.Service))
 		if svc.Version != "" {
-			fmt.Fprintf(&sb, "\\(_%s_\\)", n.escape(svc.Version))
+			fmt.Fprintf(&sb, "\\(_%s_\\)", escapeMarkdownV2(svc.Version))
 		}
 		sb.WriteString("\n")
 
 		if svc.Banner != "" {
-			fmt.Fprintf(&sb, "  ├ 📋 `Banner: %s`\n", n.escape(svc.Banner))
+			fmt.Fprintf(&sb, "  ├ 📋 `Banner: %s`\n", escapeMarkdownV2(svc.Banner))
 		}
 
 		if len(svc.Vulnerabilities) > 0 {
-			for _, v := range svc.Vulnerabilities {
-				emoji := n.getSeverityEmoji(v.Score)
-				scoreStr := n.escape(fmt.Sprintf("%.1f", v.Score))
+			for i, v := range svc.Vulnerabilities {
+				prefix := "  ├"
+				if i == len(svc.Vulnerabilities)-1 {
+					prefix = "  └"
+				}
 
-				fmt.Fprintf(&sb, "  ├ %s *%s* \\[Score: `%s`\\]", emoji, n.escape(v.CVE), scoreStr)
+				emoji := n.getSeverityEmoji(v.Score)
+				scoreStr := escapeMarkdownV2(fmt.Sprintf("%.1f", v.Score))
+				cveName := escapeMarkdownV2(v.CVE)
+
+				urlReplacer := strings.NewReplacer(")", "\\)", "\\", "\\\\")
+				escapedLink := urlReplacer.Replace(v.Link)
+
+				fmt.Fprintf(
+					&sb,
+					"%s %s [%s](%s) \\[Score: `%s`\\]",
+					prefix,
+					emoji,
+					cveName,
+					escapedLink,
+					scoreStr,
+				)
+
 				if v.ExploitAvailable {
 					sb.WriteString(" 🔥 *EXPLOIT\\!*")
 				}
 				sb.WriteString("\n")
-
-				if v.Description != "" {
-					desc := v.Description
-					if len(desc) > 120 {
-						desc = desc[:117] + "..."
-					}
-					fmt.Fprintf(&sb, "  │   └ _%s_\n", n.escape(desc))
-				}
 			}
 		} else {
 			sb.WriteString("  └ ✅ Известных CVE на порту не найдено\n")
@@ -187,9 +199,9 @@ func (n *NotifierAdapter) getSeverityEmoji(score float64) string {
 	}
 }
 
-// escape escapes all MarkdownV2 reserved characters in a plain-text string
+// escapeMarkdownV2 escapes all MarkdownV2 reserved characters in a plain-text string
 // so it can be safely embedded in a formatted Telegram message.
-func (n *NotifierAdapter) escape(text string) string {
+func escapeMarkdownV2(text string) string {
 	replacer := strings.NewReplacer(
 		"_", "\\_", "*", "\\*", "[", "\\[", "]", "\\]", "(", "\\(", ")", "\\)",
 		"~", "\\~", "`", "\\`", ">", "\\>", "#", "\\#", "+", "\\+", "-", "\\-",

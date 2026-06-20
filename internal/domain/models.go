@@ -6,7 +6,6 @@ import "time"
 type Vulnerability struct {
 	CVE              string  `json:"id"`
 	Score            float64 `json:"score"`
-	Description      string  `json:"description"`
 	ExploitAvailable bool    `json:"exploit_available"`
 	Link             string  `json:"link"`
 }
@@ -32,5 +31,6 @@ type HostScanResult struct {
 // ScanDiff describes the difference between the current and last scan
 type ScanDiff struct {
 	IP          string        `json:"ip"`
+	ScanTime    time.Time     `json:"scan_time"`
 	NewServices []ServiceInfo `json:"new_services"`
 }
