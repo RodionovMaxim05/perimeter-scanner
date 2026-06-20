@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -63,14 +64,40 @@ func run(ctx context.Context) error {
 		cfg.Application.WorkerCount,
 	)
 
-	log.Info("Perimeter scanner architecture initialized successfully. Launching scan...")
+	log.Info("Perimeter scanner architecture initialized successfully. Launching daemon...")
 
-	if err := perimeterScanner.Execute(ctx, cfg.Scanner.Targets, cfg.Scanner.Ports); err != nil {
-		return fmt.Errorf("scanner execution failed: %w", err)
+	scanChan := make(chan time.Time, 1)
+	scanChan <- time.Now()
+
+	scanInterval := time.Duration(cfg.Application.ScanInterval) * time.Minute
+	go func() {
+		ticker := time.NewTicker(scanInterval)
+		defer ticker.Stop()
+		for t := range ticker.C {
+			select {
+			case scanChan <- t:
+			default:
+			}
+		}
+	}()
+
+	log.Info("Scanner daemon is running", "interval", scanInterval.String())
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Received shutdown signal. Stopping scanner daemon...")
+			return nil
+
+		case <-scanChan:
+			log.Info("Launching perimeter scan...")
+			if err := perimeterScanner.Execute(ctx, cfg.Scanner.Targets, cfg.Scanner.Ports); err != nil {
+				log.Error("Scan execution failed", "error", err)
+			} else {
+				log.Info("Scan session completed successfully.")
+			}
+		}
 	}
-
-	log.Info("Scan session completed successfully. All threats evaluated.")
-	return nil
 }
 
 func main() {

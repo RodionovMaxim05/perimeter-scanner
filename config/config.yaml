@@ -1,4 +1,5 @@
 application:
+  scan_interval: 5
   worker_count: 10
 
 scanner:
