@@ -111,7 +111,9 @@ func (ra *RepositoryAdapter) SaveResult(ctx context.Context, result domain.HostS
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
 
 	qtx := ra.queries.WithTx(tx)
 

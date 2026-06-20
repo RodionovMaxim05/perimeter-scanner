@@ -83,7 +83,9 @@ func (n *NotifierAdapter) sendMessage(ctx context.Context, text string) error {
 		}
 		return fmt.Errorf("failed to send telegram request: %s", errStr)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		var tgErr struct {
@@ -124,27 +126,29 @@ func (n *NotifierAdapter) buildMarkdownMessage(diff domain.ScanDiff) string {
 	var sb strings.Builder
 
 	sb.WriteString("🔔 *ОБНАРУЖЕНЫ ИЗМЕНЕНИЯ ПЕРИМЕТРА*\n\n")
-	sb.WriteString(fmt.Sprintf("🌐 *Хост:* `%s`\n", n.escape(diff.IP)))
-	sb.WriteString(fmt.Sprintf("🕒 *Время фиксации:* %s\n\n", n.escape(time.Now().Format("2006-01-02 15:04:05"))))
+	fmt.Fprintf(&sb, "🌐 *Хост:* `%s`\n", n.escape(diff.IP))
+	fmt.Fprintf(&sb, "🕒 *Время фиксации:* %s\n\n", n.escape(time.Now().Format("2006-01-02 15:04:05")))
 
 	sb.WriteString("🚀 *Новые открытые сервисы:*\n")
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n")
 
 	for _, svc := range diff.NewServices {
-		sb.WriteString(fmt.Sprintf("• *%d/%s* ➔ _%s_ ", svc.Port, n.escape(svc.Proto), n.escape(svc.Service)))
+		fmt.Fprintf(&sb, "• *%d/%s* ➔ _%s_ ", svc.Port, n.escape(svc.Proto), n.escape(svc.Service))
 		if svc.Version != "" {
-			sb.WriteString(fmt.Sprintf("\\(_%s_\\)", n.escape(svc.Version)))
+			fmt.Fprintf(&sb, "\\(_%s_\\)", n.escape(svc.Version))
 		}
 		sb.WriteString("\n")
 
 		if svc.Banner != "" {
-			sb.WriteString(fmt.Sprintf("  ├ 📋 `Banner: %s`\n", n.escape(svc.Banner)))
+			fmt.Fprintf(&sb, "  ├ 📋 `Banner: %s`\n", n.escape(svc.Banner))
 		}
 
 		if len(svc.Vulnerabilities) > 0 {
 			for _, v := range svc.Vulnerabilities {
 				emoji := n.getSeverityEmoji(v.Score)
-				sb.WriteString(fmt.Sprintf("  ├ %s *%s* \\[Score: `%s`\\]", emoji, n.escape(v.CVE), n.escape(fmt.Sprintf("%.1f", v.Score))))
+				scoreStr := n.escape(fmt.Sprintf("%.1f", v.Score))
+
+				fmt.Fprintf(&sb, "  ├ %s *%s* \\[Score: `%s`\\]", emoji, n.escape(v.CVE), scoreStr)
 				if v.ExploitAvailable {
 					sb.WriteString(" 🔥 *EXPLOIT\\!*")
 				}
@@ -155,7 +159,7 @@ func (n *NotifierAdapter) buildMarkdownMessage(diff domain.ScanDiff) string {
 					if len(desc) > 120 {
 						desc = desc[:117] + "..."
 					}
-					sb.WriteString(fmt.Sprintf("  │   └ _%s_\n", n.escape(desc)))
+					fmt.Fprintf(&sb, "  │   └ _%s_\n", n.escape(desc))
 				}
 			}
 		} else {
