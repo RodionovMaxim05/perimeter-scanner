@@ -28,18 +28,20 @@ type masscanResult struct {
 type ScannerAdapter struct {
 	binaryPath string
 	rate       int
+	iface      string
 	logger     *slog.Logger
 }
 
 // NewScannerAdapter constructs a ScannerAdapter.
 // If binaryPath is empty, "masscan" is looked up in PATH.
-func NewScannerAdapter(binaryPath string, rate int, logger *slog.Logger) *ScannerAdapter {
+func NewScannerAdapter(binaryPath string, rate int, iface string, logger *slog.Logger) *ScannerAdapter {
 	if binaryPath == "" {
 		binaryPath = "masscan"
 	}
 	return &ScannerAdapter{
 		binaryPath: binaryPath,
 		rate:       rate,
+		iface:      iface,
 		logger:     logger,
 	}
 }
@@ -56,6 +58,9 @@ func (sa *ScannerAdapter) Scan(ctx context.Context, targets []string, ports stri
 		"-p", ports,
 		"--rate", strconv.Itoa(sa.rate),
 		"-oJ", "-",
+	}
+	if sa.iface != "" {
+		args = append(args, "--interface", sa.iface)
 	}
 	args = append(args, targets...)
 
