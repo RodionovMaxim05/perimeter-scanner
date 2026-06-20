@@ -119,10 +119,9 @@ func (a *EnricherAdapter) parseVulnersScript(scripts []nmap.Script) []domain.Vul
 				score, _ := strconv.ParseFloat(cvssVal, 64)
 
 				v := domain.Vulnerability{
-					CVE:      idVal,
-					Score:    score,
-					Severity: mapScoreToSeverity(score),
-					Link:     fmt.Sprintf("https://vulners.com/cve/%s", idVal),
+					CVE:   idVal,
+					Score: score,
+					Link:  fmt.Sprintf("https://vulners.com/cve/%s", idVal),
 				}
 
 				vulns = append(vulns, v)
@@ -146,21 +145,4 @@ func buildBanner(svc nmap.Service) string {
 		parts = append(parts, svc.ExtraInfo)
 	}
 	return strings.Join(parts, " ")
-}
-
-// mapScoreToSeverity converts a CVSS v3 numeric score to a Severity label
-// according to the standard FIRST.org thresholds.
-func mapScoreToSeverity(score float64) domain.Severity {
-	switch {
-	case score >= 9.0:
-		return domain.SeverityCritical
-	case score >= 7.0:
-		return domain.SeverityHigh
-	case score >= 4.0:
-		return domain.SeverityMedium
-	case score >= 0.1:
-		return domain.SeverityLow
-	default:
-		return domain.SeverityInfo
-	}
 }

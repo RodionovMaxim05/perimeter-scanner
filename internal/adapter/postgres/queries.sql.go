@@ -142,14 +142,12 @@ SELECT s.id AS service_id,
     s.cpe,
     v.cve,
     v.score,
-    sev.name AS severity,
     v.description,
     v.exploit_available,
     v.link
 FROM scan_services s
     LEFT JOIN scan_service_vulns sv ON s.id = sv.service_id
     LEFT JOIN vulnerabilities v ON sv.vulnerability_id = v.id
-    LEFT JOIN severities sev ON v.severity_id = sev.id
 WHERE s.host_scan_id = $1
 `
 
@@ -163,7 +161,6 @@ type GetServicesWithVulnerabilitiesRow struct {
 	Cpe              pgtype.Text
 	Cve              pgtype.Text
 	Score            pgtype.Numeric
-	Severity         pgtype.Text
 	Description      pgtype.Text
 	ExploitAvailable pgtype.Bool
 	Link             pgtype.Text
@@ -189,7 +186,6 @@ func (q *Queries) GetServicesWithVulnerabilities(ctx context.Context, hostScanID
 			&i.Cpe,
 			&i.Cve,
 			&i.Score,
-			&i.Severity,
 			&i.Description,
 			&i.ExploitAvailable,
 			&i.Link,
@@ -220,46 +216,17 @@ func (q *Queries) LinkServiceVuln(ctx context.Context, arg LinkServiceVulnParams
 	return err
 }
 
-const listSeverities = `-- name: ListSeverities :many
-SELECT id,
-    name
-FROM severities
-`
-
-// ListSeverities returns all severities
-func (q *Queries) ListSeverities(ctx context.Context) ([]Severity, error) {
-	rows, err := q.db.Query(ctx, listSeverities)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Severity
-	for rows.Next() {
-		var i Severity
-		if err := rows.Scan(&i.ID, &i.Name); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const upsertVulnerability = `-- name: UpsertVulnerability :one
 INSERT INTO vulnerabilities (
         cve,
         score,
-        severity_id,
         description,
         exploit_available,
         link
     )
-VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (cve) DO
+VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cve) DO
 UPDATE
 SET score = EXCLUDED.score,
-    severity_id = EXCLUDED.severity_id,
     description = EXCLUDED.description,
     exploit_available = EXCLUDED.exploit_available,
     link = EXCLUDED.link
@@ -269,7 +236,6 @@ RETURNING id
 type UpsertVulnerabilityParams struct {
 	Cve              string
 	Score            pgtype.Numeric
-	SeverityID       pgtype.Int4
 	Description      pgtype.Text
 	ExploitAvailable bool
 	Link             pgtype.Text
@@ -280,7 +246,6 @@ func (q *Queries) UpsertVulnerability(ctx context.Context, arg UpsertVulnerabili
 	row := q.db.QueryRow(ctx, upsertVulnerability,
 		arg.Cve,
 		arg.Score,
-		arg.SeverityID,
 		arg.Description,
 		arg.ExploitAvailable,
 		arg.Link,

@@ -1,9 +1,3 @@
--- ListSeverities returns all severities
--- name: ListSeverities :many
-SELECT id,
-    name
-FROM severities;
-
 -- GetLastHostScan returns the most recent scan record for a given IP
 -- name: GetLastHostScan :one
 SELECT id,
@@ -38,14 +32,12 @@ SELECT s.id AS service_id,
     s.cpe,
     v.cve,
     v.score,
-    sev.name AS severity,
     v.description,
     v.exploit_available,
     v.link
 FROM scan_services s
     LEFT JOIN scan_service_vulns sv ON s.id = sv.service_id
     LEFT JOIN vulnerabilities v ON sv.vulnerability_id = v.id
-    LEFT JOIN severities sev ON v.severity_id = sev.id
 WHERE s.host_scan_id = $1;
 
 -- CreateHostScan inserts a new scan record for a host and returns its ID
@@ -73,15 +65,13 @@ RETURNING id;
 INSERT INTO vulnerabilities (
         cve,
         score,
-        severity_id,
         description,
         exploit_available,
         link
     )
-VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (cve) DO
+VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cve) DO
 UPDATE
 SET score = EXCLUDED.score,
-    severity_id = EXCLUDED.severity_id,
     description = EXCLUDED.description,
     exploit_available = EXCLUDED.exploit_available,
     link = EXCLUDED.link

@@ -32,16 +32,10 @@ type ScanServiceVuln struct {
 	VulnerabilityID int32
 }
 
-type Severity struct {
-	ID   int32
-	Name string
-}
-
 type Vulnerability struct {
 	ID               int32
 	Cve              string
 	Score            pgtype.Numeric
-	SeverityID       pgtype.Int4
 	Description      pgtype.Text
 	ExploitAvailable bool
 	Link             pgtype.Text

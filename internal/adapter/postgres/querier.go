@@ -22,8 +22,6 @@ type Querier interface {
 	GetServicesWithVulnerabilities(ctx context.Context, hostScanID int32) ([]GetServicesWithVulnerabilitiesRow, error)
 	// LinkServiceVuln creates a many-to-many link between a service and a CVE
 	LinkServiceVuln(ctx context.Context, arg LinkServiceVulnParams) error
-	// ListSeverities returns all severities
-	ListSeverities(ctx context.Context) ([]Severity, error)
 	// UpsertVulnerability inserts a new CVE or updates it if it already exists
 	UpsertVulnerability(ctx context.Context, arg UpsertVulnerabilityParams) (int32, error)
 }
