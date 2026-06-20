@@ -143,7 +143,7 @@ func (n *NotifierAdapter) buildMarkdownMessage(diff domain.ScanDiff) string {
 
 		if len(svc.Vulnerabilities) > 0 {
 			for _, v := range svc.Vulnerabilities {
-				emoji := n.getSeverityEmoji(v.Severity)
+				emoji := n.getSeverityEmoji(v.Score)
 				sb.WriteString(fmt.Sprintf("  ├ %s *%s* \\[Score: `%s`\\]", emoji, n.escape(v.CVE), n.escape(fmt.Sprintf("%.1f", v.Score))))
 				if v.ExploitAvailable {
 					sb.WriteString(" 🔥 *EXPLOIT\\!*")
@@ -167,19 +167,19 @@ func (n *NotifierAdapter) buildMarkdownMessage(diff domain.ScanDiff) string {
 	return sb.String()
 }
 
-// severityEmoji returns a coloured circle emoji corresponding to the CVSS severity level.
-func (n *NotifierAdapter) getSeverityEmoji(sev domain.Severity) string {
-	switch sev {
-	case domain.SeverityCritical:
-		return "🔴"
-	case domain.SeverityHigh:
-		return "🟠"
-	case domain.SeverityMedium:
-		return "🟡"
-	case domain.SeverityLow:
-		return "🟢"
+// getSeverityEmoji returns a coloured circle emoji corresponding to the CVSS score.
+func (n *NotifierAdapter) getSeverityEmoji(score float64) string {
+	switch {
+	case score >= 9.0:
+		return "🔴" // Critical
+	case score >= 7.0:
+		return "🟠" // High
+	case score >= 4.0:
+		return "🟡" // Medium
+	case score >= 0.1:
+		return "🟢" // Low
 	default:
-		return "ℹ️"
+		return "ℹ️" // Info / None (0.0)
 	}
 }
 

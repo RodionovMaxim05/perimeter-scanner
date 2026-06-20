@@ -1,9 +1,3 @@
--- Severity levels catalog
-CREATE TABLE IF NOT EXISTS severities (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(20) UNIQUE NOT NULL
-);
-
 -- Deduplicated vulnerability catalog
 -- One CVE record is reused across all scans that detect it
 CREATE TABLE IF NOT EXISTS vulnerabilities(
@@ -13,7 +7,6 @@ CREATE TABLE IF NOT EXISTS vulnerabilities(
         score >= 0.0
         AND score <= 10.0
     ),
-    severity_id INT REFERENCES severities(id) ON DELETE RESTRICT,
     description TEXT,
     exploit_available BOOLEAN DEFAULT FALSE NOT NULL,
     link TEXT
@@ -58,11 +51,3 @@ CREATE INDEX IF NOT EXISTS idx_scan_services_scan ON scan_services(host_scan_id)
 
 -- Fetch all CVEs for a given service
 CREATE INDEX IF NOT EXISTS idx_svc_vulns_service ON scan_service_vulns(service_id);
-
--- Filling the severity catalog
-INSERT INTO severities (name)
-VALUES ('critical'),
-    ('high'),
-    ('medium'),
-    ('low'),
-    ('info') ON CONFLICT (name) DO NOTHING;

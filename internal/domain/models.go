@@ -2,25 +2,13 @@ package domain
 
 import "time"
 
-// Severity is the degree of critical vulnerability
-type Severity string
-
-const (
-	SeverityCritical Severity = "critical"
-	SeverityHigh     Severity = "high"
-	SeverityMedium   Severity = "medium"
-	SeverityLow      Severity = "low"
-	SeverityInfo     Severity = "info"
-)
-
 // Vulnerability describes the vulnerability found
 type Vulnerability struct {
-	CVE              string   `json:"id"`
-	Score            float64  `json:"score"`
-	Severity         Severity `json:"severity"`
-	Description      string   `json:"description"`
-	ExploitAvailable bool     `json:"exploit_available"`
-	Link             string   `json:"link"`
+	CVE              string  `json:"id"`
+	Score            float64 `json:"score"`
+	Description      string  `json:"description"`
+	ExploitAvailable bool    `json:"exploit_available"`
+	Link             string  `json:"link"`
 }
 
 // ServiceInfo contains information about the service on the port

@@ -16,40 +16,16 @@ import (
 // RepositoryAdapter implements domain.ResultRepository backed by PostgreSQL.
 // It uses sqlc-generated queries and pgxpool for connection management.
 type RepositoryAdapter struct {
-	pool          *pgxpool.Pool
-	queries       *Queries
-	severityCache map[string]int32
+	pool    *pgxpool.Pool
+	queries *Queries
 }
 
-// NewDBRepository constructs a RepositoryAdapter and preloads the severities
-// lookup table into memory to avoid repeated DB round-trips during saves.
+// NewDBRepository constructs a RepositoryAdapter and preloads.
 func NewDBRepository(ctx context.Context, pool *pgxpool.Pool) (*RepositoryAdapter, error) {
-	queries := New(pool)
-
-	severities, err := loadSeverities(ctx, queries)
-	if err != nil {
-		return nil, fmt.Errorf("failed to preload severities: %w", err)
-	}
-
 	return &RepositoryAdapter{
-		pool:          pool,
-		queries:       queries,
-		severityCache: severities,
+		pool:    pool,
+		queries: New(pool),
 	}, nil
-}
-
-// loadSeverities fetches all rows from the severities table once at startup
-// and returns a name->id map.
-func loadSeverities(ctx context.Context, q *Queries) (map[string]int32, error) {
-	rows, err := q.ListSeverities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cache := make(map[string]int32, len(rows))
-	for _, row := range rows {
-		cache[row.Name] = row.ID
-	}
-	return cache, nil
 }
 
 // GetPreviousResult returns the most recent scan result for the given IP.
@@ -109,7 +85,6 @@ func buildServicesFromRows(rows []GetServicesWithVulnerabilitiesRow) []domain.Se
 		svc.Vulnerabilities = append(svc.Vulnerabilities, domain.Vulnerability{
 			CVE:              row.Cve.String,
 			Score:            score.Float64,
-			Severity:         domain.Severity(row.Severity.String),
 			Description:      row.Description.String,
 			ExploitAvailable: row.ExploitAvailable.Bool,
 			Link:             row.Link.String,
@@ -186,11 +161,6 @@ func (ra *RepositoryAdapter) saveScanService(
 	}
 
 	for _, vuln := range svc.Vulnerabilities {
-		severityID, ok := ra.severityCache[string(vuln.Severity)]
-		if !ok {
-			return fmt.Errorf("unknown severity %q", vuln.Severity)
-		}
-
 		scoreNumeric, err := scoreToNumeric(vuln.Score)
 		if err != nil {
 			return fmt.Errorf("convert score for %s: %w", vuln.CVE, err)
@@ -199,7 +169,6 @@ func (ra *RepositoryAdapter) saveScanService(
 		vulnID, err := qtx.UpsertVulnerability(ctx, UpsertVulnerabilityParams{
 			Cve:              vuln.CVE,
 			Score:            scoreNumeric,
-			SeverityID:       pgtype.Int4{Int32: severityID, Valid: true},
 			Description:      pgtype.Text{String: vuln.Description, Valid: vuln.Description != ""},
 			ExploitAvailable: vuln.ExploitAvailable,
 			Link:             pgtype.Text{String: vuln.Link, Valid: vuln.Link != ""},

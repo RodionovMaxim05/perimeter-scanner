@@ -11,5 +11,3 @@ DROP TABLE IF EXISTS services;
 DROP TABLE IF EXISTS host_scans;
 
 DROP TABLE IF EXISTS vulnerabilities;
-
-DROP TABLE IF EXISTS severities;
