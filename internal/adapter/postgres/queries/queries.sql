@@ -32,7 +32,6 @@ SELECT s.id AS service_id,
     s.cpe,
     v.cve,
     v.score,
-    v.description,
     v.exploit_available,
     v.link
 FROM scan_services s
@@ -65,14 +64,12 @@ RETURNING id;
 INSERT INTO vulnerabilities (
         cve,
         score,
-        description,
         exploit_available,
         link
     )
-VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cve) DO
+VALUES ($1, $2, $3, $4) ON CONFLICT (cve) DO
 UPDATE
 SET score = EXCLUDED.score,
-    description = EXCLUDED.description,
     exploit_available = EXCLUDED.exploit_available,
     link = EXCLUDED.link
 RETURNING id;

@@ -142,7 +142,6 @@ SELECT s.id AS service_id,
     s.cpe,
     v.cve,
     v.score,
-    v.description,
     v.exploit_available,
     v.link
 FROM scan_services s
@@ -161,7 +160,6 @@ type GetServicesWithVulnerabilitiesRow struct {
 	Cpe              pgtype.Text
 	Cve              pgtype.Text
 	Score            pgtype.Numeric
-	Description      pgtype.Text
 	ExploitAvailable pgtype.Bool
 	Link             pgtype.Text
 }
@@ -186,7 +184,6 @@ func (q *Queries) GetServicesWithVulnerabilities(ctx context.Context, hostScanID
 			&i.Cpe,
 			&i.Cve,
 			&i.Score,
-			&i.Description,
 			&i.ExploitAvailable,
 			&i.Link,
 		); err != nil {
@@ -220,14 +217,12 @@ const upsertVulnerability = `-- name: UpsertVulnerability :one
 INSERT INTO vulnerabilities (
         cve,
         score,
-        description,
         exploit_available,
         link
     )
-VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cve) DO
+VALUES ($1, $2, $3, $4) ON CONFLICT (cve) DO
 UPDATE
 SET score = EXCLUDED.score,
-    description = EXCLUDED.description,
     exploit_available = EXCLUDED.exploit_available,
     link = EXCLUDED.link
 RETURNING id
@@ -236,7 +231,6 @@ RETURNING id
 type UpsertVulnerabilityParams struct {
 	Cve              string
 	Score            pgtype.Numeric
-	Description      pgtype.Text
 	ExploitAvailable bool
 	Link             pgtype.Text
 }
@@ -246,7 +240,6 @@ func (q *Queries) UpsertVulnerability(ctx context.Context, arg UpsertVulnerabili
 	row := q.db.QueryRow(ctx, upsertVulnerability,
 		arg.Cve,
 		arg.Score,
-		arg.Description,
 		arg.ExploitAvailable,
 		arg.Link,
 	)

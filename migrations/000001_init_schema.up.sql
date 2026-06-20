@@ -7,7 +7,6 @@ CREATE TABLE IF NOT EXISTS vulnerabilities(
         score >= 0.0
         AND score <= 10.0
     ),
-    description TEXT,
     exploit_available BOOLEAN DEFAULT FALSE NOT NULL,
     link TEXT
 );

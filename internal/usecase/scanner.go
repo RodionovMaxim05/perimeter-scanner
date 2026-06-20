@@ -202,6 +202,7 @@ func (suc *ScannerUseCase) enrichExploitsBatch(ctx context.Context, host *domain
 func (suc *ScannerUseCase) calculateDiff(current, previous domain.HostScanResult, found bool) domain.ScanDiff {
 	diff := domain.ScanDiff{
 		IP:          current.IP,
+		ScanTime:    current.ScanTime,
 		NewServices: []domain.ServiceInfo{},
 	}
 
