@@ -14,6 +14,12 @@ type ServiceEnricher interface {
 	Enrich(ctx context.Context, host *HostScanResult) error
 }
 
+// ExploitChecker defines a contract for checking public exploit availability for a CVE.
+type ExploitChecker interface {
+	// CheckExploit reports whether a publicly known exploit exists for the given CVE ID.
+	CheckExploit(ctx context.Context, cveID string) (bool, error)
+}
+
 // ResultRepository is responsible for storing history and retrieving past results
 type ResultRepository interface {
 	// GetPreviousResult returns history by IP. If there is no data, it returns (_, false, nil)

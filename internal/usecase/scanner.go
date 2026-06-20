@@ -12,12 +12,13 @@ import (
 // ScannerUseCase orchestrates the full perimeter scan pipeline:
 // fast port discovery -> deep enrichment -> diff with history -> alert.
 type ScannerUseCase struct {
-	scanner     domain.NetworkScanner
-	enricher    domain.ServiceEnricher
-	repo        domain.ResultRepository
-	notifier    domain.AlertNotifier
-	logger      *slog.Logger
-	workerCount int
+	scanner        domain.NetworkScanner
+	enricher       domain.ServiceEnricher
+	exploitChecker domain.ExploitChecker
+	repo           domain.ResultRepository
+	notifier       domain.AlertNotifier
+	logger         *slog.Logger
+	workerCount    int
 }
 
 // NewScannerUseCase constructs a ScannerUseCase with all required dependencies.
@@ -25,6 +26,7 @@ type ScannerUseCase struct {
 func NewScannerUseCase(
 	scanner domain.NetworkScanner,
 	enricher domain.ServiceEnricher,
+	exploitChecker domain.ExploitChecker,
 	repo domain.ResultRepository,
 	notifier domain.AlertNotifier,
 	logger *slog.Logger,
@@ -35,12 +37,13 @@ func NewScannerUseCase(
 	}
 
 	return &ScannerUseCase{
-		scanner:     scanner,
-		enricher:    enricher,
-		repo:        repo,
-		notifier:    notifier,
-		logger:      logger,
-		workerCount: workerCount,
+		scanner:        scanner,
+		enricher:       enricher,
+		exploitChecker: exploitChecker,
+		repo:           repo,
+		notifier:       notifier,
+		logger:         logger,
+		workerCount:    workerCount,
 	}
 }
 
@@ -135,6 +138,9 @@ func (suc *ScannerUseCase) enrichHostsParallel(ctx context.Context, hosts []doma
 				if err != nil {
 					suc.logger.Error("Enrichment failed for host", "ip", host.IP, "error", err)
 				}
+
+				suc.enrichExploits(ctx, &host)
+
 				resultsChan <- host
 			}
 		}(i)
@@ -153,6 +159,23 @@ func (suc *ScannerUseCase) enrichHostsParallel(ctx context.Context, hosts []doma
 	}
 
 	return enrichedHosts
+}
+
+// enrichExploits checks all host vulnerabilities for a public exploit.
+func (suc *ScannerUseCase) enrichExploits(ctx context.Context, host *domain.HostScanResult) {
+	for sIdx := range host.Services {
+		for vIdx := range host.Services[sIdx].Vulnerabilities {
+			cveID := host.Services[sIdx].Vulnerabilities[vIdx].CVE
+
+			hasExploit, err := suc.exploitChecker.CheckExploit(ctx, cveID)
+			if err != nil {
+				suc.logger.Error("Failed to check exploit status", "cve", cveID, "error", err)
+				continue
+			}
+
+			host.Services[sIdx].Vulnerabilities[vIdx].ExploitAvailable = hasExploit
+		}
+	}
 }
 
 // calculateDiff compares the current host scan result against the previous one.
