@@ -19,6 +19,10 @@ type Scanner struct {
 	Interface string   `yaml:"interface" env:"SCAN_INTERFACE" env-default:""`
 }
 
+type Vulners struct {
+	APIKey string `yaml:"api_key" env:"VULNERS_API_KEY"`
+}
+
 type Database struct {
 	Host     string `yaml:"host" env:"POSTGRES_HOST" env-default:"localhost"`
 	Port     int    `yaml:"port" env:"POSTGRES_PORT" env-default:"5432"`
@@ -47,6 +51,7 @@ func (d Database) URL() string {
 type Config struct {
 	Application Application   `yaml:"application"`
 	Scanner     Scanner       `yaml:"scanner"`
+	Vulners     Vulners       `yaml:"vulners"`
 	Logger      logger.Config `yaml:"logger"`
 	Database    Database      `yaml:"database"`
 	Telegram    Telegram      `yaml:"telegram"`

@@ -15,6 +15,7 @@ import (
 	"perimeter-scanner/internal/adapter/nmap"
 	"perimeter-scanner/internal/adapter/postgres"
 	"perimeter-scanner/internal/adapter/telegram"
+	"perimeter-scanner/internal/adapter/vulners"
 	"perimeter-scanner/internal/config"
 	"perimeter-scanner/internal/usecase"
 )
@@ -36,6 +37,7 @@ func run(ctx context.Context) error {
 
 	masscanScanner := masscan.NewScannerAdapter("", cfg.Scanner.Rate, cfg.Scanner.Interface, log)
 	nmapEnricher := nmap.NewEnricherAdapter(log)
+	vulnersClient := vulners.NewExploitCheckerAdapter(cfg.Vulners.APIKey)
 	telegramNotifier := telegram.NewNotifierAdapter(cfg.Telegram.Token, cfg.Telegram.ChatID)
 
 	// repo database
@@ -58,6 +60,7 @@ func run(ctx context.Context) error {
 	perimeterScanner := usecase.NewScannerUseCase(
 		masscanScanner,
 		nmapEnricher,
+		vulnersClient,
 		postgresClient,
 		telegramNotifier,
 		log,
