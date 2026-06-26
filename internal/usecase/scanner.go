@@ -10,15 +10,20 @@ import (
 )
 
 // ScannerUseCase orchestrates the full perimeter scan pipeline:
-// fast port discovery -> deep enrichment -> diff with history -> alert.
+//
+//	Port discovery -> Service enrichment -> CVE lookup
+//	-> Exploit check -> Diff with history -> Alert -> Persist
+//
+// All stages are pipelined and streaming: enrichment workers start processing
+// hosts as soon as the scanner emits them, without waiting for the full scan to finish.
 type ScannerUseCase struct {
-	scanner        domain.NetworkScanner
-	enricher       domain.ServiceEnricher
-	exploitChecker domain.ExploitChecker
-	repo           domain.ResultRepository
-	notifier       domain.AlertNotifier
+	scanner        domain.NetworkScanner   // fast port discovery
+	enricher       domain.ServiceEnricher  // deep service fingerprinting and CVE lookup
+	exploitChecker domain.ExploitChecker   // exploit availability lookup
+	repo           domain.ResultRepository // persistence layer
+	notifier       domain.AlertNotifier    // alert delivery
+	workerCount    int                     // number of parallel enrichment workers
 	logger         *slog.Logger
-	workerCount    int
 }
 
 // NewScannerUseCase constructs a ScannerUseCase with all required dependencies.
@@ -29,8 +34,8 @@ func NewScannerUseCase(
 	exploitChecker domain.ExploitChecker,
 	repo domain.ResultRepository,
 	notifier domain.AlertNotifier,
-	logger *slog.Logger,
 	workerCount int,
+	logger *slog.Logger,
 ) *ScannerUseCase {
 	if workerCount <= 0 {
 		workerCount = 1
@@ -42,21 +47,27 @@ func NewScannerUseCase(
 		exploitChecker: exploitChecker,
 		repo:           repo,
 		notifier:       notifier,
-		logger:         logger,
 		workerCount:    workerCount,
+		logger:         logger,
 	}
 }
 
 // Execute runs a single full perimeter scan cycle for the given targets and ports.
 //
-// The pipeline is:
-//  1. NetworkScanner — fast discovery of open ports across all targets.
-//  2. ServiceEnricher — parallel deep scan of each discovered host.
-//  3. Diff — compare current state with the last saved result per host.
-//  4. Alert — notify owner if new services or CVEs appeared.
-//  5. Persist — save current state to the repository.
+// The pipeline stages are:
+//  1. NetworkScanner  — streams discovered open ports as hosts are found.
+//  2. ServiceEnricher — parallel service fingerprinting and CVE lookup per host.
+//  3. ExploitChecker  — batch exploit availability check for all CVEs on a host.
+//  4. Diff            — compare against the last persisted state for the same IP.
+//  5. AlertNotifier   — notify if new services or CVEs appeared since last scan.
+//  6. Repository      — persist the current state for future diff comparisons.
 //
-// Returns a non-nil error if the fast scan fails.
+// Stages 1–3 are fully pipelined: enrichment starts as soon as the first host
+// arrives from the scanner, without waiting for the full scan to complete.
+//
+// Returns a non-nil error only if the underlying scanner fails fatally.
+// Per-host enrichment, alert, and persistence errors are logged and skipped
+// so a single bad host does not abort the entire cycle.
 func (suc *ScannerUseCase) Execute(ctx context.Context, targets []string, ports string) error {
 	suc.logger.Info("Starting streaming perimeter scan pipeline", "targets", targets, "ports", ports)
 
@@ -96,10 +107,13 @@ func (suc *ScannerUseCase) Execute(ctx context.Context, targets []string, ports 
 	return nil
 }
 
-// startEnrichmentWorkers initializes a concurrent worker pool to process service enrichment.
+// startEnrichmentWorkers starts a pool of workerCount goroutines that consume
+// raw hosts from inChan, enrich each host with service fingerprints and exploit
+// data, and forward results to the returned channel.
 //
-// It spawns a fixed number of goroutines that compete for raw host results on the input channel,
-// performs banner grabbing and exploit status mapping, and aggregates outcomes into a single output channel.
+// The output channel is closed automatically once all workers finish, which
+// happens after inChan is closed and drained. If ctx is cancelled, each worker
+// stops after completing its current host (no mid-host cancellation).
 func (suc *ScannerUseCase) startEnrichmentWorkers(ctx context.Context, inChan <-chan domain.HostScanResult) <-chan domain.HostScanResult {
 	outChan := make(chan domain.HostScanResult)
 	var wg sync.WaitGroup

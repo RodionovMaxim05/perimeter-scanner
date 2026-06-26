@@ -13,12 +13,15 @@ import (
 	"perimeter-scanner/internal/domain"
 )
 
+// masscanPort represents a single port entry in masscan's JSON output.
+
 type masscanPort struct {
 	Port   int    `json:"port"`
 	Proto  string `json:"proto"`
 	Status string `json:"status"`
 }
 
+// masscanResult represents a single host entry in masscan's JSON output.
 type masscanResult struct {
 	IP    string        `json:"ip"`
 	Ports []masscanPort `json:"ports"`
@@ -28,9 +31,9 @@ type masscanResult struct {
 // hosts over a channel as JSON records arrive on stdout, without waiting for
 // the full scan to complete.
 type ScannerAdapter struct {
-	binaryPath string
-	rate       int
-	iface      string
+	binaryPath string // path to the masscan binary, or "masscan" if resolved via PATH
+	rate       int    // packet transmission rate (packets per second)
+	iface      string // network interface to bind to; empty means masscan picks the default
 	logger     *slog.Logger
 }
 

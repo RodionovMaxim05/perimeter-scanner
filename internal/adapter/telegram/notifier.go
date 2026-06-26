@@ -17,13 +17,12 @@ const maxTelegramMessageLen = 4096
 
 // NotifierAdapter sends scan diff alerts to a Telegram chat via Bot API.
 type NotifierAdapter struct {
-	token  string
-	chatID string
+	token  string // Telegram bot token
+	chatID string // target chat or channel ID
 	client *http.Client
 }
 
-// NewNotifierAdapter constructs a NotifierAdapter.
-// token is the Telegram bot token; chatID is the target chat or channel ID.
+// NewNotifierAdapter constructs a NotifierAdapter for the given bot token and chat ID.
 func NewNotifierAdapter(token, chatID string) *NotifierAdapter {
 	return &NotifierAdapter{
 		token:  token,

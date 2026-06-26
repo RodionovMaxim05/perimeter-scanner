@@ -63,8 +63,8 @@ func run(ctx context.Context) error {
 		vulnersClient,
 		postgresClient,
 		telegramNotifier,
-		log,
 		cfg.Application.WorkerCount,
+		log,
 	)
 
 	log.Info("Perimeter scanner architecture initialized successfully. Launching daemon...")
