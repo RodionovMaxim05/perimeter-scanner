@@ -58,22 +58,15 @@ func NewScannerUseCase(
 //
 // Returns a non-nil error if the fast scan fails.
 func (suc *ScannerUseCase) Execute(ctx context.Context, targets []string, ports string) error {
-	suc.logger.Info("Starting perimeter scan", "targets", targets, "ports", ports)
+	suc.logger.Info("Starting streaming perimeter scan pipeline", "targets", targets, "ports", ports)
 
-	rawHosts, err := suc.scanner.Scan(ctx, targets, ports)
-	if err != nil {
-		suc.logger.Error("Fast scan failed", "error", err)
-		return err
-	}
+	// Initiate background port scanning
+	hostsChan, scanErrChan := suc.scanner.Scan(ctx, targets, ports)
 
-	if len(rawHosts) == 0 {
-		suc.logger.Info("No open ports found on the perimeter")
-		return nil
-	}
+	// Enrich results concurrently as they bleed from NetworkScanner
+	enrichedChan := suc.startEnrichmentWorkers(ctx, hostsChan)
 
-	enrichedHosts := suc.enrichHostsParallel(ctx, rawHosts)
-
-	for _, currentHost := range enrichedHosts {
+	for currentHost := range enrichedChan {
 		prevHost, found, err := suc.repo.GetPreviousResult(ctx, currentHost.IP)
 		if err != nil {
 			suc.logger.Error("Failed to get previous result", "ip", currentHost.IP, "error", err)
@@ -83,10 +76,7 @@ func (suc *ScannerUseCase) Execute(ctx context.Context, targets []string, ports 
 		diff := suc.calculateDiff(currentHost, prevHost, found)
 
 		if len(diff.NewServices) > 0 {
-			suc.logger.Warn("New services or vulnerabilities detected",
-				"ip", diff.IP,
-				"new_services", len(diff.NewServices),
-			)
+			suc.logger.Warn("New services or vulnerabilities detected", "ip", diff.IP, "new_services", len(diff.NewServices))
 			if err := suc.notifier.SendDiffAlert(ctx, diff); err != nil {
 				suc.logger.Error("Failed to send alert", "ip", diff.IP, "error", err)
 			}
@@ -97,34 +87,29 @@ func (suc *ScannerUseCase) Execute(ctx context.Context, targets []string, ports 
 		}
 	}
 
+	if err := <-scanErrChan; err != nil {
+		suc.logger.Error("Masscan pipeline finished with error", "error", err)
+		return err
+	}
+
 	suc.logger.Info("Perimeter scan iteration finished successfully")
 	return nil
 }
 
-// enrichHostsParallel runs enrichment concurrently using a worker pool.
+// startEnrichmentWorkers initializes a concurrent worker pool to process service enrichment.
 //
-// It spawns workerCount goroutines, each pulling enrichment jobs from a buffered channel.
-// If ctx is cancelled, workers stop before processing the next host.
-// Hosts that fail enrichment are still included in the result with whatever
-// data was populated before the error.
-func (suc *ScannerUseCase) enrichHostsParallel(ctx context.Context, hosts []domain.HostScanResult) []domain.HostScanResult {
-	numJobs := len(hosts)
-	jobsChan := make(chan domain.HostScanResult, numJobs)
-	resultsChan := make(chan domain.HostScanResult, numJobs)
-
-	// Filling the channel with tasks
-	for _, host := range hosts {
-		jobsChan <- host
-	}
-	close(jobsChan)
-
+// It spawns a fixed number of goroutines that compete for raw host results on the input channel,
+// performs banner grabbing and exploit status mapping, and aggregates outcomes into a single output channel.
+func (suc *ScannerUseCase) startEnrichmentWorkers(ctx context.Context, inChan <-chan domain.HostScanResult) <-chan domain.HostScanResult {
+	outChan := make(chan domain.HostScanResult)
 	var wg sync.WaitGroup
 
 	for i := 0; i < suc.workerCount; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			for host := range jobsChan {
+
+			for host := range inChan {
 				select {
 				case <-ctx.Done():
 					suc.logger.Warn("Worker cancelled", "worker_id", workerID)
@@ -134,14 +119,17 @@ func (suc *ScannerUseCase) enrichHostsParallel(ctx context.Context, hosts []doma
 
 				suc.logger.Debug("Worker processing host", "worker_id", workerID, "ip", host.IP)
 
-				err := suc.enricher.Enrich(ctx, &host)
-				if err != nil {
+				if err := suc.enricher.Enrich(ctx, &host); err != nil {
 					suc.logger.Error("Enrichment failed for host", "ip", host.IP, "error", err)
 				}
 
 				suc.enrichExploitsBatch(ctx, &host)
 
-				resultsChan <- host
+				select {
+				case <-ctx.Done():
+					return
+				case outChan <- host:
+				}
 			}
 		}(i)
 	}
@@ -149,16 +137,10 @@ func (suc *ScannerUseCase) enrichHostsParallel(ctx context.Context, hosts []doma
 	// Wait for all workers
 	go func() {
 		wg.Wait()
-		close(resultsChan)
+		close(outChan)
 	}()
 
-	// Collecting results from channel
-	var enrichedHosts []domain.HostScanResult
-	for res := range resultsChan {
-		enrichedHosts = append(enrichedHosts, res)
-	}
-
-	return enrichedHosts
+	return outChan
 }
 
 // enrichExploitsBatch queries the exploit checker service in a single batch request
