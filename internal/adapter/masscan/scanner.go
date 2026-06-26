@@ -24,7 +24,9 @@ type masscanResult struct {
 	Ports []masscanPort `json:"ports"`
 }
 
-// ScannerAdapter runs masscan as an external process and parses its JSON output.
+// ScannerAdapter wraps masscan as an external process and streams discovered
+// hosts over a channel as JSON records arrive on stdout, without waiting for
+// the full scan to complete.
 type ScannerAdapter struct {
 	binaryPath string
 	rate       int
@@ -46,98 +48,145 @@ func NewScannerAdapter(binaryPath string, rate int, iface string, logger *slog.L
 	}
 }
 
-// Scan runs masscan against the given targets and ports and returns discovered hosts.
-// Targets are CIDRs or individual IPs; ports is a masscan-format string e.g. "22,80,443,8000-9000".
-// Returns (nil, nil) if masscan finds no open ports.
-func (sa *ScannerAdapter) Scan(ctx context.Context, targets []string, ports string) ([]domain.HostScanResult, error) {
+// Scan launches masscan via stdbuf (to disable output buffering) and streams
+// discovered hosts as they are found, without waiting for the scan to finish.
+//
+// targets is a list of CIDRs or individual IPs (e.g. ["192.168.1.0/24", "10.0.0.1"]).
+// ports is a masscan-format port specification (e.g. "22,80,443,8000-9000").
+//
+// Returns two channels:
+//   - hostsChan: emits one [domain.HostScanResult] per discovered host; closed when the scan ends.
+//   - errChan:   buffered (cap 1); receives at most one fatal error, then is closed.
+//
+// The caller must drain hostsChan until it is closed, even if errChan fires,
+// to avoid blocking the internal goroutine. Cancelling ctx terminates masscan
+// and causes both channels to be closed without an error.
+func (sa *ScannerAdapter) Scan(ctx context.Context, targets []string, ports string) (<-chan domain.HostScanResult, <-chan error) {
+	hostsChan := make(chan domain.HostScanResult)
+	errChan := make(chan error, 1)
+
 	if len(targets) == 0 {
-		return nil, nil
+		close(hostsChan)
+		close(errChan)
+		return hostsChan, errChan
 	}
 
-	args := []string{
-		"-p", ports,
-		"--rate", strconv.Itoa(sa.rate),
-		"-oJ", "-",
-	}
-	if sa.iface != "" {
-		args = append(args, "--interface", sa.iface)
-	}
-	args = append(args, targets...)
+	go func() {
+		defer close(hostsChan)
+		defer close(errChan)
 
-	cmd := exec.CommandContext(ctx, sa.binaryPath, args...)
+		args := []string{
+			"-oL", sa.binaryPath,
+			"-p", ports,
+			"--rate", strconv.Itoa(sa.rate),
+			"-oJ", "-",
+		}
+		if sa.iface != "" {
+			args = append(args, "--interface", sa.iface)
+		}
+		args = append(args, targets...)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
+		cmd := exec.CommandContext(ctx, "stdbuf", args...)
 
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			errChan <- fmt.Errorf("failed to create stdout pipe: %w", err)
+			return
+		}
 
-	startTime := time.Now()
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start masscan: %w", err)
-	}
+		var stderrBuf bytes.Buffer
+		cmd.Stderr = &stderrBuf
 
-	results := make([]domain.HostScanResult, 0)
+		startTime := time.Now()
+		if err := cmd.Start(); err != nil {
+			errChan <- fmt.Errorf("failed to start masscan: %w", err)
+			return
+		}
 
-	dec := json.NewDecoder(stdout)
+		dec := json.NewDecoder(stdout)
 
-	// Read the opening bracket `[`
-	t, err := dec.Token()
-	if err != nil {
-		// Masscan found nothing
-		_ = cmd.Wait()
-		sa.logger.Debug("Masscan returned no output")
-		return nil, nil
-	}
+		// Read the opening bracket `[`
+		t, err := dec.Token()
+		if err != nil {
+			waitErr := cmd.Wait()
+			if ctx.Err() != nil {
+				// Scan cancelled by user
+				return
+			}
+			if waitErr != nil {
+				errChan <- fmt.Errorf("masscan failed on startup: %w (stderr: %s)", waitErr, stderrBuf.String())
+			} else {
+				sa.logger.Debug("Masscan returned no output")
+			}
+			return
+		}
 
-	if delim, ok := t.(json.Delim); !ok || delim != '[' {
-		_ = cmd.Wait()
-		return nil, fmt.Errorf("expected json array start '[', got %v", t)
-	}
-
-	// Read the array elements one by one until there is data
-	for dec.More() {
-		var r masscanResult
-		if err := dec.Decode(&r); err != nil {
+		if delim, ok := t.(json.Delim); !ok || delim != '[' {
 			_ = cmd.Wait()
-			return nil, fmt.Errorf("failed to decode masscan item: %w", err)
+			errChan <- fmt.Errorf("expected json array start '[', got %v", t)
+			return
 		}
 
-		if r.IP == "" || len(r.Ports) == 0 {
-			continue
-		}
+		hostCount := 0
 
-		services := make([]domain.ServiceInfo, 0, len(r.Ports))
-		for _, p := range r.Ports {
-			if p.Status != "open" {
+		// Read the array elements one by one as they appear in stdout
+		for dec.More() {
+			var r masscanResult
+			if err := dec.Decode(&r); err != nil {
+				_ = cmd.Wait()
+				if ctx.Err() != nil {
+					// Error was caused by context cancellation
+					return
+				}
+				errChan <- fmt.Errorf("failed to decode masscan item: %w", err)
+				return
+			}
+
+			if r.IP == "" || len(r.Ports) == 0 {
 				continue
 			}
 
-			services = append(services, domain.ServiceInfo{
-				Port:  p.Port,
-				Proto: p.Proto,
-			})
+			services := make([]domain.ServiceInfo, 0, len(r.Ports))
+			for _, p := range r.Ports {
+				if p.Status != "open" {
+					continue
+				}
+				services = append(services, domain.ServiceInfo{
+					Port:  p.Port,
+					Proto: p.Proto,
+				})
+			}
+
+			hostResult := domain.HostScanResult{
+				IP:       r.IP,
+				ScanTime: startTime,
+				Services: services,
+			}
+
+			// Send the host to the channel
+			select {
+			case <-ctx.Done():
+				_ = cmd.Wait()
+				return
+			case hostsChan <- hostResult:
+				hostCount++
+			}
 		}
 
-		results = append(results, domain.HostScanResult{
-			IP:       r.IP,
-			ScanTime: startTime,
-			Services: services,
-		})
-	}
+		// Read the closing bracket `]`
+		_, _ = dec.Token()
 
-	// Read the closing bracket `]`
-	_, _ = dec.Token()
-
-	if err := cmd.Wait(); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		// Waiting the final completion of the process
+		if err := cmd.Wait(); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			errChan <- fmt.Errorf("masscan finished with error: %w (stderr: %s)", err, stderrBuf.String())
+			return
 		}
-		return nil, fmt.Errorf("masscan finished with error: %w (stderr: %s)", err, stderrBuf.String())
-	}
 
-	sa.logger.Debug("Masscan streaming finished", "duration", time.Since(startTime), "found_hosts", len(results))
-	return results, nil
+		sa.logger.Debug("Masscan streaming finished", "duration", time.Since(startTime), "found_hosts", hostCount)
+	}()
+
+	return hostsChan, errChan
 }
