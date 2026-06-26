@@ -3,8 +3,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: perimeter-scanner
     env_file:
       - .env
+    environment:
+      TZ: Europe/Moscow
     volumes:
       - ./config/config.yaml:/config.yaml
     network_mode: "host"
@@ -12,8 +15,8 @@ services:
       - NET_RAW
       - NET_ADMIN
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
 
   postgres:
     image: postgres:17-alpine
@@ -26,13 +29,24 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 2s
       timeout: 5s
       retries: 5
-      start_period: 5s
+
+  migrator:
+    image: migrate/migrate
+    network_mode: "host"
+    volumes:
+      - ./migrations:/migrations
+    command: >
+      -path=/migrations
+      -database=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@localhost:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-perimeter-scanner}?sslmode=${POSTGRES_SSLMODE:-disable}
+      up
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   pgdata:
