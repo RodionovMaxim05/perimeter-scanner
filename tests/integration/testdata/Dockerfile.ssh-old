@@ -1,0 +1,13 @@
+# OpenSSH 7.2p1
+
+FROM ubuntu:16.04
+
+RUN apt-get update && apt-get install -y \
+        openssh-server \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir /var/run/sshd
+
+EXPOSE 22
+
+CMD ["/usr/sbin/sshd", "-D"]

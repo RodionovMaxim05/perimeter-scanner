@@ -1,0 +1,52 @@
+services:
+  test-runner:
+    environment:
+      VULN_SSH_HOST: vuln-ssh
+      TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/perimeter-scanner-test?sslmode=disable
+    build:
+      context: ../../
+      dockerfile: tests/integration/Dockerfile.test
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    depends_on:
+      vuln-ssh:
+        condition: service_started
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: perimeter-scanner-test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+  migrator:
+    image: migrate/migrate
+    networks:
+      - default
+    volumes:
+      - ../../migrations:/migrations
+    command: >
+      -path=/migrations
+      -database=postgres://postgres:postgres@postgres:5432/perimeter-scanner-test?sslmode=disable
+      up
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  vuln-ssh:
+    build:
+      context: ./testdata
+      dockerfile: Dockerfile.ssh-old
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.1.0/24
