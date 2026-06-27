@@ -36,4 +36,4 @@ jobs:
         run: make lint
 
       - name: Tests
-        run: make test-integration
+        run: make test
