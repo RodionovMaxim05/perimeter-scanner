@@ -86,7 +86,7 @@ func TestFullScanPipeline_FindsKnownVulnerableSSH(t *testing.T) {
 		testLogger(t),
 	)
 
-	if err := suc.Execute(ctx, []string{targetIP + "/24"}, "22"); err != nil {
+	if err := suc.Execute(ctx, []string{targetIP + "/32"}, "22"); err != nil {
 		t.Fatalf("scan execution failed: %v", err)
 	}
 
