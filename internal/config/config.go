@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 
 	"perimeter-scanner/infrastructure/env"
 	"perimeter-scanner/infrastructure/logger"
@@ -13,10 +14,11 @@ type Application struct {
 }
 
 type Scanner struct {
-	Targets   []string `yaml:"targets" env:"SCAN_TARGETS" env-delimiters:","`
-	Ports     string   `yaml:"ports"   env:"SCAN_PORTS"   env-default:"80,8000-8100"`
-	Rate      int      `yaml:"rate"    env:"SCAN_RATE"    env-default:"1000"`
-	Interface string   `yaml:"interface" env:"SCAN_INTERFACE" env-default:""`
+	BinaryPath string   `yaml:"binary_path" env:"SCAN_BINARY_PATH" env-default:"masscan"`
+	Rate       int      `yaml:"rate"    env:"SCAN_RATE"    env-default:"1000"`
+	Interface  string   `yaml:"interface" env:"SCAN_INTERFACE" env-default:""`
+	Targets    []string `yaml:"targets" env:"SCAN_TARGETS" env-delimiters:","`
+	Ports      string   `yaml:"ports"   env:"SCAN_PORTS"   env-default:"80,8000-8100"`
 }
 
 type Vulners struct {
@@ -60,5 +62,38 @@ type Config struct {
 func MustLoad(path string) Config {
 	var cfg Config
 	env.MustLoad(path, &cfg)
+
+	if cfg.Scanner.Interface == "" {
+		cfg.Scanner.Interface = GetActiveInterface()
+	}
+
 	return cfg
+}
+
+func GetActiveInterface() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		// Fall back to default if the OS has denied access to interfaces
+		return "eth0"
+	}
+
+	for _, iface := range ifaces {
+		// Look for an interface that is UP and is not the loopback
+		if iface.Flags&net.FlagUp != 0 && iface.Flags&net.FlagLoopback == 0 {
+			// Checking for the presence of a MAC address
+			if len(iface.HardwareAddr) == 0 {
+				continue
+			}
+
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			// If the interface has at least one IP address assigned
+			if len(addrs) > 0 {
+				return iface.Name
+			}
+		}
+	}
+	return "eth0"
 }
