@@ -105,18 +105,26 @@ func (n *NotifierAdapter) splitMessage(text string) []string {
 	if len(text) <= maxTelegramMessageLen {
 		return []string{text}
 	}
+
 	var parts []string
 	var current strings.Builder
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if i == len(lines)-1 && line == "" {
+			break
+		}
+
 		if current.Len()+len(line)+1 > maxTelegramMessageLen {
 			parts = append(parts, current.String())
 			current.Reset()
 		}
 		current.WriteString(line + "\n")
 	}
+
 	if current.Len() > 0 {
 		parts = append(parts, current.String())
 	}
+
 	return parts
 }
 

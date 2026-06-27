@@ -7,7 +7,7 @@ GOLANGCI_LINT := $(GOBIN)/golangci-lint
 
 GOLANGCI_LINT_VERSION := v2.12.2
 
-.PHONY: fmtcheck lint tools test-integration
+.PHONY: fmtcheck lint tools test-integration test-unit test
 
 fmtcheck:
 	@files="$$($(GOIMPORTS) -l .)"; \
@@ -35,3 +35,8 @@ test-integration:
 	# 4. Complete resource cleanup.
 	docker compose -f tests/integration/docker-compose.test.yml down --volumes; \
 	exit $$EXIT_CODE
+
+test-unit:
+	go test -v ./internal/...
+
+test: test-unit test-integration
