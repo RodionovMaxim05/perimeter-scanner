@@ -241,24 +241,32 @@ func makeServiceKey(port int, proto string) string {
 	return strconv.Itoa(port) + "/" + proto
 }
 
-// findNewVulnerabilities returns CVEs that appear in current but not in previous.
-// Comparison is done by CVE identifier.
+// findNewVulnerabilities returns vulnerabilities from current that are considered
+// new or escalated compared to previous. A vulnerability is included if:
+//   - its CVE ID was not present in the previous scan at all, or
+//   - it was known before but now has a public exploit that wasn't recorded then.
 func (suc *ScannerUseCase) findNewVulnerabilities(current, previous []domain.Vulnerability) []domain.Vulnerability {
 	if len(previous) == 0 {
 		return current
 	}
 
-	prevVulsMap := make(map[string]struct{})
+	prevVulsMap := make(map[string]domain.Vulnerability)
 	for _, v := range previous {
-		prevVulsMap[v.CVE] = struct{}{}
+		prevVulsMap[v.CVE] = v
 	}
 
 	var newVuls []domain.Vulnerability
 	for _, v := range current {
-		if _, seen := prevVulsMap[v.CVE]; !seen {
+		_, knownCVE := prevVulsMap[v.CVE]
+		if !knownCVE {
+			// CVE not seen before — report regardless of exploit status
+			newVuls = append(newVuls, v)
+			continue
+		}
+		if v.ExploitAvailable && !prevVulsMap[v.CVE].ExploitAvailable {
+			// Known CVE that has escalated: exploit became publicly available.
 			newVuls = append(newVuls, v)
 		}
-
 	}
 
 	return newVuls
