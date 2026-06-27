@@ -17,6 +17,7 @@ import (
 	"perimeter-scanner/internal/adapter/telegram"
 	"perimeter-scanner/internal/adapter/vulners"
 	"perimeter-scanner/internal/config"
+	"perimeter-scanner/internal/domain"
 	"perimeter-scanner/internal/usecase"
 )
 
@@ -35,9 +36,15 @@ func run(ctx context.Context) error {
 
 	// Adapters
 
-	masscanScanner := masscan.NewScannerAdapter("", cfg.Scanner.Rate, cfg.Scanner.Interface, log)
+	masscanScanner := masscan.NewScannerAdapter(cfg.Scanner.BinaryPath, cfg.Scanner.Rate, cfg.Scanner.Interface, log)
 	nmapEnricher := nmap.NewEnricherAdapter(log)
-	vulnersClient := vulners.NewExploitCheckerAdapter(cfg.Vulners.APIKey)
+	var vulnersClient domain.ExploitChecker
+	if cfg.Vulners.APIKey != "" {
+		vulnersClient = vulners.NewExploitCheckerAdapter(cfg.Vulners.APIKey)
+	} else {
+		log.Info("Vulners API key not set, exploit detection disabled")
+		vulnersClient = &vulners.NoopExploitChecker{}
+	}
 	telegramNotifier := telegram.NewNotifierAdapter(cfg.Telegram.Token, cfg.Telegram.ChatID)
 
 	// repo database
