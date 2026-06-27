@@ -5,10 +5,13 @@ import (
 	"os"
 )
 
+// Config holds logger settings loaded from YAML or environment variables.
 type Config struct {
-	LogLevel string `yaml:"log_level" default:"DEBUG"`
+	LogLevel string `yaml:"log_level" default:"DEBUG"` // DEBUG, INFO, or ERROR
 }
 
+// MustMakeLogger constructs a text-format slog.Logger writing to stderr
+// at the given log level. Panics if logLevel is not one of DEBUG, INFO, ERROR.
 func MustMakeLogger(logLevel string) *slog.Logger {
 	var level slog.Level
 	switch logLevel {
