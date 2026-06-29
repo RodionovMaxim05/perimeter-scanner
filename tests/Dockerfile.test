@@ -13,4 +13,4 @@ RUN go mod download
 
 COPY . .
 
-CMD ["go", "test", "-tags=integration", "-v", "./tests/integration/..."]
+CMD ["go", "test", "-tags=integration", "-v", "./tests/..."]

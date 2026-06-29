@@ -2,15 +2,18 @@ services:
   test-runner:
     environment:
       VULN_SSH_HOST: vuln-ssh
+      HTTP_TARGET_HOST: http-target
       TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/perimeter-scanner-test?sslmode=disable
     build:
-      context: ../../
-      dockerfile: tests/integration/Dockerfile.test
+      context: ../
+      dockerfile: tests/Dockerfile.test
     cap_add:
       - NET_RAW
       - NET_ADMIN
     depends_on:
       vuln-ssh:
+        condition: service_started
+      http-target:
         condition: service_started
 
   postgres:
@@ -30,7 +33,7 @@ services:
     networks:
       - default
     volumes:
-      - ../../migrations:/migrations
+      - ../migrations:/migrations
     command: >
       -path=/migrations
       -database=postgres://postgres:postgres@postgres:5432/perimeter-scanner-test?sslmode=disable
@@ -43,6 +46,11 @@ services:
     build:
       context: ./testdata
       dockerfile: Dockerfile.ssh-old
+
+  http-target:
+    build:
+      context: ./testdata
+      dockerfile: Dockerfile.http-controllable
 
 networks:
   default:
