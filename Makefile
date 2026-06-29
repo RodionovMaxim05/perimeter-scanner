@@ -26,14 +26,14 @@ tools:
 
 test-integration:
 	# 1. Starting Postgres in the background.
-	docker compose -f tests/integration/docker-compose.test.yml up -d postgres
+	docker compose -f tests/docker-compose.test.yml up -d postgres
 	# 2. Launching the migrator.
-	docker compose -f tests/integration/docker-compose.test.yml run --rm migrator
+	docker compose -f tests/docker-compose.test.yml run --rm migrator
 	# 3. Launching the tests.
-	@docker compose -f tests/integration/docker-compose.test.yml up --build --exit-code-from test-runner test-runner vuln-ssh; \
+	@docker compose -f tests/docker-compose.test.yml up --build --exit-code-from test-runner test-runner vuln-ssh; \
 	EXIT_CODE=$$?; \
 	# 4. Complete resource cleanup.
-	docker compose -f tests/integration/docker-compose.test.yml down --volumes; \
+	docker compose -f tests/docker-compose.test.yml down --volumes; \
 	exit $$EXIT_CODE
 
 test-unit:

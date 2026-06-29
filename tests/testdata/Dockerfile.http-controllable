@@ -1,0 +1,7 @@
+# Nginx with 80 and 443 ports
+
+FROM nginx:1.30-alpine
+
+COPY nginx-controllable.conf /etc/nginx/nginx.conf
+
+EXPOSE 80 443
