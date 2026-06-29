@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"perimeter-scanner/internal/config"
 	"perimeter-scanner/internal/domain"
 )
 
@@ -21,9 +22,10 @@ func newUC(
 	exploitChecker domain.ExploitChecker,
 	repo domain.ResultRepository,
 	notifier domain.AlertNotifier,
+	notify_strategy string,
 	workers int,
 ) *ScannerUseCase {
-	return NewScannerUseCase(scanner, enricher, exploitChecker, repo, notifier, workers, newLogger())
+	return NewScannerUseCase(scanner, enricher, exploitChecker, repo, notifier, notify_strategy, workers, newLogger())
 }
 
 func vuln(cve string, exploit bool) domain.Vulnerability {
@@ -128,7 +130,7 @@ func TestMakeServiceKey(t *testing.T) {
 // Tests for findNewVulnerabilities
 
 func TestFindNewVulnerabilities(t *testing.T) {
-	uc := newUC(nil, nil, nil, nil, nil, 1)
+	uc := newUC(nil, nil, nil, nil, nil, config.StrategyImmediate, 1)
 
 	t.Run("empty previous returns all current", func(t *testing.T) {
 		cur := []domain.Vulnerability{vuln("CVE-2026-001", false)}
@@ -181,7 +183,7 @@ func TestFindNewVulnerabilities(t *testing.T) {
 // Tests for calculateDiff
 
 func TestCalculateDiff(t *testing.T) {
-	uc := newUC(nil, nil, nil, nil, nil, 1)
+	uc := newUC(nil, nil, nil, nil, nil, config.StrategyImmediate, 1)
 
 	t.Run("first-ever scan: all services are new", func(t *testing.T) {
 		cur := host("1.2.3.4", svc(80, "tcp"), svc(443, "tcp"))
@@ -235,7 +237,7 @@ func TestCalculateDiff(t *testing.T) {
 func TestEnrichExploitsBatch(t *testing.T) {
 	t.Run("updates ExploitAvailable on matching CVE", func(t *testing.T) {
 		checker := &stubExploitChecker{result: map[string]bool{"CVE-2026-001": true}}
-		uc := newUC(nil, nil, checker, nil, nil, 1)
+		uc := newUC(nil, nil, checker, nil, nil, config.StrategyImmediate, 1)
 
 		h := host("1.2.3.4", svc(80, "tcp", vuln("CVE-2026-001", false)))
 		uc.enrichExploitsBatch(context.Background(), &h)
@@ -249,7 +251,7 @@ func TestEnrichExploitsBatch(t *testing.T) {
 		called := false
 		checker := &stubExploitChecker{}
 		_ = called
-		uc := newUC(nil, nil, checker, nil, nil, 1)
+		uc := newUC(nil, nil, checker, nil, nil, config.StrategyImmediate, 1)
 
 		h := host("1.2.3.4", svc(80, "tcp")) // no vulns
 		uc.enrichExploitsBatch(context.Background(), &h)
@@ -258,7 +260,7 @@ func TestEnrichExploitsBatch(t *testing.T) {
 
 	t.Run("checker error is tolerated", func(t *testing.T) {
 		checker := &stubExploitChecker{err: errors.New("service unavailable")}
-		uc := newUC(nil, nil, checker, nil, nil, 1)
+		uc := newUC(nil, nil, checker, nil, nil, config.StrategyImmediate, 1)
 
 		h := host("1.2.3.4", svc(80, "tcp", vuln("CVE-X", false)))
 		uc.enrichExploitsBatch(context.Background(), &h) // must not panic
@@ -273,7 +275,7 @@ func TestEnrichExploitsBatch(t *testing.T) {
 		checker := &stubExploitChecker{result: map[string]bool{"CVE-SHARED": true}}
 		// Wrap to count calls – use a closure-based checker
 		_ = callCount
-		uc := newUC(nil, nil, checker, nil, nil, 1)
+		uc := newUC(nil, nil, checker, nil, nil, config.StrategyImmediate, 1)
 
 		h := host("1.2.3.4",
 			svc(80, "tcp", vuln("CVE-SHARED", false)),
@@ -292,78 +294,17 @@ func TestEnrichExploitsBatch(t *testing.T) {
 // Tests for Execute (pipeline)
 
 func TestExecute(t *testing.T) {
+
+	// Shared across both strategies
+
 	t.Run("scanner error is returned", func(t *testing.T) {
 		scanner := &stubScanner{err: errors.New("masscan failed")}
 		repo := &stubRepo{}
-		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, &stubNotifier{}, 1)
+		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, &stubNotifier{}, config.StrategyImmediate, 1)
 
 		err := uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "1-1000")
 		if err == nil || err.Error() != "masscan failed" {
 			t.Fatalf("expected masscan error, got %v", err)
-		}
-	})
-
-	t.Run("happy path: host is saved", func(t *testing.T) {
-		h := host("192.168.1.1", svc(22, "tcp"))
-		scanner := &stubScanner{hosts: []domain.HostScanResult{h}}
-		repo := &stubRepo{found: false}
-		notifier := &stubNotifier{}
-		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, notifier, 2)
-
-		err := uc.Execute(context.Background(), []string{"192.168.1.0/24"}, "22")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(repo.saved) != 1 {
-			t.Fatalf("expected 1 saved host, got %d", len(repo.saved))
-		}
-	})
-
-	t.Run("alert is sent for new host", func(t *testing.T) {
-		h := host("10.0.0.1", svc(80, "tcp"))
-		scanner := &stubScanner{hosts: []domain.HostScanResult{h}}
-		repo := &stubRepo{found: false}
-		notifier := &stubNotifier{}
-		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, notifier, 1)
-
-		_ = uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80")
-
-		if len(notifier.alerts) != 1 {
-			t.Fatalf("expected 1 alert, got %d", len(notifier.alerts))
-		}
-		if notifier.alerts[0].IP != "10.0.0.1" {
-			t.Errorf("alert IP = %q; want 10.0.0.1", notifier.alerts[0].IP)
-		}
-	})
-
-	t.Run("no alert sent when nothing changed", func(t *testing.T) {
-		h := host("10.0.0.1", svc(80, "tcp"))
-		scanner := &stubScanner{hosts: []domain.HostScanResult{h}}
-		repo := &stubRepo{found: true, prev: h}
-		notifier := &stubNotifier{}
-		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, notifier, 1)
-
-		_ = uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80")
-
-		if len(notifier.alerts) != 0 {
-			t.Fatalf("expected no alerts, got %d", len(notifier.alerts))
-		}
-	})
-
-	t.Run("repo error on GetPreviousResult does not abort pipeline", func(t *testing.T) {
-		h1 := host("10.0.0.1", svc(80, "tcp"))
-		h2 := host("10.0.0.2", svc(443, "tcp"))
-		scanner := &stubScanner{hosts: []domain.HostScanResult{h1, h2}}
-
-		callCount := 0
-		repo := &repoWithFirstCallError{}
-		notifier := &stubNotifier{}
-		_ = callCount
-		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, notifier, 1)
-
-		err := uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80,443")
-		if err != nil {
-			t.Fatalf("pipeline should not abort on per-host repo error: %v", err)
 		}
 	})
 
@@ -374,7 +315,7 @@ func TestExecute(t *testing.T) {
 		scanner := &chanScanner{hc: hc, ec: ec}
 
 		repo := &stubRepo{}
-		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, &stubNotifier{}, 2)
+		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, &stubNotifier{}, config.StrategyImmediate, 2)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
@@ -386,6 +327,164 @@ func TestExecute(t *testing.T) {
 		case <-done: // completed (possibly with ctx error)
 		case <-time.After(2 * time.Second):
 			t.Fatal("Execute did not return after context cancellation")
+		}
+	})
+
+	t.Run("two ports same IP are always aggregated into one saved host", func(t *testing.T) {
+		// Regardless of notification strategy, the persistence layer must
+		// receive a single HostScanResult per IP with all ports merged.
+		for _, strategy := range []string{config.StrategyImmediate, config.StrategyAggregated} {
+			t.Run(strategy, func(t *testing.T) {
+				h1 := host("10.0.0.1", svc(80, "tcp"))
+				h2 := host("10.0.0.1", svc(443, "tcp"))
+				scanner := &stubScanner{hosts: []domain.HostScanResult{h1, h2}}
+				repo := &stubRepo{}
+				uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, &stubNotifier{}, strategy, 1)
+
+				_ = uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80,443")
+
+				if len(repo.saved) != 1 {
+					t.Fatalf("expected 1 saved host, got %d", len(repo.saved))
+				}
+				if len(repo.saved[0].Services) != 2 {
+					t.Fatalf("expected 2 services in saved host, got %d", len(repo.saved[0].Services))
+				}
+			})
+		}
+	})
+
+	t.Run("no alert sent when nothing changed", func(t *testing.T) {
+		for _, strategy := range []string{config.StrategyImmediate, config.StrategyAggregated} {
+			t.Run(strategy, func(t *testing.T) {
+				h := host("10.0.0.1", svc(80, "tcp"))
+				scanner := &stubScanner{hosts: []domain.HostScanResult{h}}
+				repo := &stubRepo{found: true, prev: h}
+				notifier := &stubNotifier{}
+				uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, notifier, strategy, 1)
+
+				_ = uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80")
+
+				if len(notifier.alerts) != 0 {
+					t.Fatalf("expected no alerts, got %d", len(notifier.alerts))
+				}
+			})
+		}
+	})
+
+	t.Run("repo error on GetPreviousResult does not abort pipeline", func(t *testing.T) {
+		for _, strategy := range []string{config.StrategyImmediate, config.StrategyAggregated} {
+			t.Run(strategy, func(t *testing.T) {
+				h1 := host("10.0.0.1", svc(80, "tcp"))
+				h2 := host("10.0.0.2", svc(443, "tcp"))
+				scanner := &stubScanner{hosts: []domain.HostScanResult{h1, h2}}
+				uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, &repoWithFirstCallError{}, &stubNotifier{}, strategy, 1)
+
+				err := uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80,443")
+				if err != nil {
+					t.Fatalf("pipeline should not abort on per-host repo error: %v", err)
+				}
+			})
+		}
+	})
+
+	// StrategyImmediate
+
+	t.Run("immediate: alert sent for each new port separately", func(t *testing.T) {
+		// Two ports on the same host arrive as separate scanner results.
+		// In immediate mode each triggers its own alert before aggregation.
+		h1 := host("10.0.0.1", svc(80, "tcp"))
+		h2 := host("10.0.0.1", svc(443, "tcp"))
+		scanner := &stubScanner{hosts: []domain.HostScanResult{h1, h2}}
+		repo := &stubRepo{found: false}
+		notifier := &stubNotifier{}
+		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, notifier, config.StrategyImmediate, 1)
+
+		_ = uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80,443")
+
+		if len(notifier.alerts) != 2 {
+			t.Fatalf("expected 2 alerts (one per port), got %d", len(notifier.alerts))
+		}
+	})
+
+	t.Run("immediate: alert contains correct IP", func(t *testing.T) {
+		h := host("10.0.0.1", svc(80, "tcp"))
+		scanner := &stubScanner{hosts: []domain.HostScanResult{h}}
+		repo := &stubRepo{found: false}
+		notifier := &stubNotifier{}
+		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, notifier, config.StrategyImmediate, 1)
+
+		_ = uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80")
+
+		if len(notifier.alerts) != 1 {
+			t.Fatalf("expected 1 alert, got %d", len(notifier.alerts))
+		}
+		if notifier.alerts[0].IP != "10.0.0.1" {
+			t.Errorf("alert IP = %q; want 10.0.0.1", notifier.alerts[0].IP)
+		}
+	})
+
+	t.Run("immediate: host is persisted after scan", func(t *testing.T) {
+		h := host("192.168.1.1", svc(22, "tcp"))
+		scanner := &stubScanner{hosts: []domain.HostScanResult{h}}
+		repo := &stubRepo{found: false}
+		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, &stubNotifier{}, config.StrategyImmediate, 2)
+
+		if err := uc.Execute(context.Background(), []string{"192.168.1.0/24"}, "22"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(repo.saved) != 1 {
+			t.Fatalf("expected 1 saved host, got %d", len(repo.saved))
+		}
+	})
+
+	// StrategyAggregated
+
+	t.Run("aggregated: single alert combining all new ports for one host", func(t *testing.T) {
+		h1 := host("10.0.0.1", svc(80, "tcp"))
+		h2 := host("10.0.0.1", svc(443, "tcp"))
+		scanner := &stubScanner{hosts: []domain.HostScanResult{h1, h2}}
+		repo := &stubRepo{found: false}
+		notifier := &stubNotifier{}
+		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, notifier, config.StrategyAggregated, 1)
+
+		_ = uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80,443")
+
+		if len(notifier.alerts) != 1 {
+			t.Fatalf("expected 1 combined alert, got %d", len(notifier.alerts))
+		}
+		if len(notifier.alerts[0].NewServices) != 2 {
+			t.Fatalf("expected 2 new services in alert, got %d", len(notifier.alerts[0].NewServices))
+		}
+	})
+
+	t.Run("aggregated: alert sent for new host", func(t *testing.T) {
+		h := host("10.0.0.1", svc(80, "tcp"))
+		scanner := &stubScanner{hosts: []domain.HostScanResult{h}}
+		repo := &stubRepo{found: false}
+		notifier := &stubNotifier{}
+		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, notifier, config.StrategyAggregated, 1)
+
+		_ = uc.Execute(context.Background(), []string{"10.0.0.0/24"}, "80")
+
+		if len(notifier.alerts) != 1 {
+			t.Fatalf("expected 1 alert, got %d", len(notifier.alerts))
+		}
+		if notifier.alerts[0].IP != "10.0.0.1" {
+			t.Errorf("alert IP = %q; want 10.0.0.1", notifier.alerts[0].IP)
+		}
+	})
+
+	t.Run("aggregated: host is persisted after scan", func(t *testing.T) {
+		h := host("192.168.1.1", svc(22, "tcp"))
+		scanner := &stubScanner{hosts: []domain.HostScanResult{h}}
+		repo := &stubRepo{found: false}
+		uc := newUC(scanner, &stubEnricher{}, &stubExploitChecker{}, repo, &stubNotifier{}, config.StrategyAggregated, 2)
+
+		if err := uc.Execute(context.Background(), []string{"192.168.1.0/24"}, "22"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(repo.saved) != 1 {
+			t.Fatalf("expected 1 saved host, got %d", len(repo.saved))
 		}
 	})
 }
@@ -428,14 +527,14 @@ func (s *chanScanner) Scan(ctx context.Context, _ []string, _ string) (<-chan do
 // Tests for NewScannerUseCase
 
 func TestNewScannerUseCase_DefaultWorkerCount(t *testing.T) {
-	uc := NewScannerUseCase(nil, nil, nil, nil, nil, 0, newLogger())
+	uc := NewScannerUseCase(nil, nil, nil, nil, nil, config.StrategyImmediate, 0, newLogger())
 	if uc.workerCount != 1 {
 		t.Errorf("workerCount = %d; want 1 for invalid input", uc.workerCount)
 	}
 }
 
 func TestNewScannerUseCase_NegativeWorkerCount(t *testing.T) {
-	uc := NewScannerUseCase(nil, nil, nil, nil, nil, -5, newLogger())
+	uc := NewScannerUseCase(nil, nil, nil, nil, nil, config.StrategyImmediate, -5, newLogger())
 	if uc.workerCount != 1 {
 		t.Errorf("workerCount = %d; want 1 for negative input", uc.workerCount)
 	}

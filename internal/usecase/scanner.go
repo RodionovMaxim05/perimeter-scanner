@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"sync"
 
+	"perimeter-scanner/internal/config"
 	"perimeter-scanner/internal/domain"
 )
 
@@ -17,23 +18,26 @@ import (
 // All stages are pipelined and streaming: enrichment workers start processing
 // hosts as soon as the scanner emits them, without waiting for the full scan to finish.
 type ScannerUseCase struct {
-	scanner        domain.NetworkScanner   // fast port discovery
-	enricher       domain.ServiceEnricher  // deep service fingerprinting and CVE lookup
-	exploitChecker domain.ExploitChecker   // exploit availability lookup
-	repo           domain.ResultRepository // persistence layer
-	notifier       domain.AlertNotifier    // alert delivery
-	workerCount    int                     // number of parallel enrichment workers
-	logger         *slog.Logger
+	scanner               domain.NetworkScanner   // fast port discovery
+	enricher              domain.ServiceEnricher  // deep service fingerprinting and CVE lookup
+	exploitChecker        domain.ExploitChecker   // exploit availability lookup
+	repo                  domain.ResultRepository // persistence layer
+	notifier              domain.AlertNotifier    // alert delivery
+	notification_strategy string                  // config.StrategyImmediate or config.StrategyAggregated
+	workerCount           int                     // number of parallel enrichment workers
+	logger                *slog.Logger
 }
 
 // NewScannerUseCase constructs a ScannerUseCase with all required dependencies.
 // workerCount controls how many Nmap enrichment workers run in parallel.
+// notification_strategy must be one of the constants defined in the config package.
 func NewScannerUseCase(
 	scanner domain.NetworkScanner,
 	enricher domain.ServiceEnricher,
 	exploitChecker domain.ExploitChecker,
 	repo domain.ResultRepository,
 	notifier domain.AlertNotifier,
+	notification_strategy string,
 	workerCount int,
 	logger *slog.Logger,
 ) *ScannerUseCase {
@@ -42,13 +46,14 @@ func NewScannerUseCase(
 	}
 
 	return &ScannerUseCase{
-		scanner:        scanner,
-		enricher:       enricher,
-		exploitChecker: exploitChecker,
-		repo:           repo,
-		notifier:       notifier,
-		workerCount:    workerCount,
-		logger:         logger,
+		scanner:               scanner,
+		enricher:              enricher,
+		exploitChecker:        exploitChecker,
+		repo:                  repo,
+		notifier:              notifier,
+		notification_strategy: notification_strategy,
+		workerCount:           workerCount,
+		logger:                logger,
 	}
 }
 
@@ -58,12 +63,21 @@ func NewScannerUseCase(
 //  1. NetworkScanner  — streams discovered open ports as hosts are found.
 //  2. ServiceEnricher — parallel service fingerprinting and CVE lookup per host.
 //  3. ExploitChecker  — batch exploit availability check for all CVEs on a host.
-//  4. Diff            — compare against the last persisted state for the same IP.
-//  5. AlertNotifier   — notify if new services or CVEs appeared since last scan.
-//  6. Repository      — persist the current state for future diff comparisons.
+//  4. Aggregation     — ports emitted separately by the scanner are merged into
+//     a single HostScanResult per IP before persistence and diff.
+//  5. Diff            — compare against the last persisted state for the same IP.
+//  6. AlertNotifier   — notify according to the configured notification strategy.
+//  7. Repository      — persist the aggregated state, replacing the previous record.
 //
 // Stages 1–3 are fully pipelined: enrichment starts as soon as the first host
 // arrives from the scanner, without waiting for the full scan to complete.
+//
+// Notification timing depends on notification_strategy:
+//   - Immediate:  diff and alert happen in stage 3, before aggregation is complete.
+//     Each enriched port result is diffed independently against the stored state,
+//     so a host with multiple new ports may trigger multiple alerts.
+//   - Aggregated: diff and alert happen in stage 5, after all ports for a host
+//     are collected. A host with multiple new ports produces one combined alert.
 //
 // Returns a non-nil error only if the underlying scanner fails fatally.
 // Per-host enrichment, alert, and persistence errors are logged and skipped
@@ -77,24 +91,54 @@ func (suc *ScannerUseCase) Execute(ctx context.Context, targets []string, ports 
 	// Enrich results concurrently as they bleed from NetworkScanner
 	enrichedChan := suc.startEnrichmentWorkers(ctx, hostsChan)
 
+	// Aggregate per-port results into per-host results
+	aggregatedHosts := make(map[string]domain.HostScanResult)
+
 	for currentHost := range enrichedChan {
-		prevHost, found, err := suc.repo.GetPreviousResult(ctx, currentHost.IP)
-		if err != nil {
-			suc.logger.Error("Failed to get previous result", "ip", currentHost.IP, "error", err)
-			continue
-		}
+		if suc.notification_strategy == config.StrategyImmediate {
+			prevHost, found, err := suc.repo.GetPreviousResult(ctx, currentHost.IP)
+			if err != nil {
+				suc.logger.Error("Failed to get previous result for immediate check", "ip", currentHost.IP, "error", err)
+			}
 
-		diff := suc.calculateDiff(currentHost, prevHost, found)
-
-		if len(diff.NewServices) > 0 {
-			suc.logger.Warn("New services or vulnerabilities detected", "ip", diff.IP, "new_services", len(diff.NewServices))
-			if err := suc.notifier.SendDiffAlert(ctx, diff); err != nil {
-				suc.logger.Error("Failed to send alert", "ip", diff.IP, "error", err)
+			diff := suc.calculateDiff(currentHost, prevHost, found)
+			if len(diff.NewServices) > 0 {
+				suc.logger.Warn("Immediate alert: New services or vulnerabilities detected", "ip", diff.IP)
+				if err := suc.notifier.SendDiffAlert(ctx, diff); err != nil {
+					suc.logger.Error("Failed to send alert", "ip", diff.IP, "error", err)
+				}
 			}
 		}
 
-		if err := suc.repo.SaveResult(ctx, currentHost); err != nil {
-			suc.logger.Error("Failed to save host state", "ip", currentHost.IP, "error", err)
+		host, exists := aggregatedHosts[currentHost.IP]
+		if !exists {
+			aggregatedHosts[currentHost.IP] = currentHost
+			continue
+		}
+		host.Services = append(host.Services, currentHost.Services...)
+		aggregatedHosts[currentHost.IP] = host
+	}
+
+	// Process each fully aggregated host: alert (if aggregated strategy) and persist.
+	for _, finalHost := range aggregatedHosts {
+		if suc.notification_strategy == config.StrategyAggregated {
+			prevHost, found, err := suc.repo.GetPreviousResult(ctx, finalHost.IP)
+			if err != nil {
+				suc.logger.Error("Failed to get previous result for aggregated check", "ip", finalHost.IP, "error", err)
+				continue
+			}
+
+			diff := suc.calculateDiff(finalHost, prevHost, found)
+			if len(diff.NewServices) > 0 {
+				suc.logger.Warn("Aggregated alert: Changes detected!", "ip", diff.IP)
+				if err := suc.notifier.SendDiffAlert(ctx, diff); err != nil {
+					suc.logger.Error("Failed to send alert", "ip", diff.IP, "error", err)
+				}
+			}
+		}
+
+		if err := suc.repo.SaveResult(ctx, finalHost); err != nil {
+			suc.logger.Error("Failed to save final host state", "ip", finalHost.IP, "error", err)
 		}
 	}
 

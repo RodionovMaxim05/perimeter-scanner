@@ -1,4 +1,5 @@
 application:
+  notification_strategy: "immediate"
   scan_interval: 5
   worker_count: 10
 

@@ -11,12 +11,12 @@ CREATE TABLE IF NOT EXISTS vulnerabilities(
     link TEXT
 );
 
--- One record per (host, point-in-time) scan
+-- One record per host
 CREATE TABLE IF NOT EXISTS host_scans (
     id SERIAL PRIMARY KEY,
     ip INET NOT NULL,
     scan_time TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-    CONSTRAINT uniq_host_scan_time UNIQUE (ip, scan_time)
+    CONSTRAINT uniq_host_scan_time UNIQUE (ip)
 );
 
 -- Open ports and services discovered during a specific host scan
@@ -41,9 +41,6 @@ CREATE TABLE IF NOT EXISTS scan_service_vulns (
     vulnerability_id INT NOT NULL REFERENCES vulnerabilities(id) ON DELETE RESTRICT,
     PRIMARY KEY (service_id, vulnerability_id)
 );
-
--- Fetch all scans for a given IP ordered by time
-CREATE INDEX IF NOT EXISTS idx_host_scans_ip_time ON host_scans(ip, scan_time DESC);
 
 -- Fetch all services for a given scan
 CREATE INDEX IF NOT EXISTS idx_scan_services_scan ON scan_services(host_scan_id);
