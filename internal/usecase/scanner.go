@@ -130,7 +130,7 @@ func (suc *ScannerUseCase) Execute(ctx context.Context, targets []string, ports 
 
 			diff := suc.calculateDiff(finalHost, prevHost, found)
 			if len(diff.NewServices) > 0 {
-				suc.logger.Warn("Aggregated alert: Changes detected!", "ip", diff.IP)
+				suc.logger.Warn("Aggregated alert: New services or vulnerabilities detected", "ip", diff.IP)
 				if err := suc.notifier.SendDiffAlert(ctx, diff); err != nil {
 					suc.logger.Error("Failed to send alert", "ip", diff.IP, "error", err)
 				}
