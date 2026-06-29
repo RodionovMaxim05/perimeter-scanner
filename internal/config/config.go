@@ -96,7 +96,8 @@ type Config struct {
 
 // MustLoad reads configuration from the YAML file at path, overrides values
 // with environment variables, and auto-detects the network interface if one
-// was not explicitly configured. Panics if the file cannot be read or parsed.
+// was not explicitly configured or if auto mode was selected.
+// Panics if the file cannot be read or parsed.
 func MustLoad(path string) Config {
 	var cfg Config
 	env.MustLoad(path, &cfg)
@@ -105,7 +106,7 @@ func MustLoad(path string) Config {
 		panic(fmt.Sprintf("invalid configuration: %v", err))
 	}
 
-	if cfg.Scanner.Interface == "" {
+	if cfg.Scanner.Interface == "" || cfg.Scanner.Interface == "auto" {
 		cfg.Scanner.Interface = GetActiveInterface()
 	}
 

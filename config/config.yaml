@@ -1,15 +1,15 @@
 application:
-  notification_strategy: "immediate"
-  scan_interval: 5
-  worker_count: 10
+  notification_strategy: "immediate" # "immediate" for real-time per port, "aggregated" for a single report per host
+  scan_interval: 5                   # Scanning period interval in minutes
+  worker_count: 10                   # Number of concurrent enrichment workers
 
 scanner:
-  binary_path: "masscan"
-  targets:
+  binary_path: "masscan" # Path to binary. Requires NET_RAW; if necessary, you can override this locally via absolute path or using a custom sudo script
+  targets:               # Target subnets or IP ranges
     - "192.168.1.0/24"
-  ports: "80,8000-8100"
-  rate: 1000
-  interface: "wlo1"
+  ports: "80,8000-8100"  # Ports targeted by Masscan
+  rate: 1000             # Masscan packet transmit rate
+  interface: "wlo1"      # Network interface for scanning (or enter "auto" to automatically detect the appropriate one)
 
 logger:
   log_level: "DEBUG"
