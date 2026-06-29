@@ -32,8 +32,10 @@ func (a *EnricherAdapter) Enrich(ctx context.Context, host *domain.HostScanResul
 	}
 
 	portsStr := make([]string, len(host.Services))
+	servicesMap := make(map[int]domain.ServiceInfo)
 	for i, svc := range host.Services {
 		portsStr[i] = strconv.Itoa(svc.Port)
+		servicesMap[svc.Port] = svc
 	}
 
 	a.logger.Debug("Starting Nmap enrichment", "ip", host.IP, "ports", portsStr)
@@ -43,6 +45,7 @@ func (a *EnricherAdapter) Enrich(ctx context.Context, host *domain.HostScanResul
 		nmap.WithPorts(strings.Join(portsStr, ",")),
 		nmap.WithServiceInfo(),      // -sV: version detection
 		nmap.WithScripts("vulners"), // CVE lookup via vulners script
+		nmap.WithSkipHostDiscovery(),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create nmap scanner: %w", err)
@@ -54,6 +57,7 @@ func (a *EnricherAdapter) Enrich(ctx context.Context, host *domain.HostScanResul
 	}
 
 	if len(result.Hosts) == 0 {
+		a.logger.Warn("Nmap returned no hosts, keeping raw masscan results", "ip", host.IP)
 		return nil
 	}
 
@@ -62,24 +66,35 @@ func (a *EnricherAdapter) Enrich(ctx context.Context, host *domain.HostScanResul
 	var enrichedServices []domain.ServiceInfo
 
 	for _, nmapPort := range nmapHost.Ports {
-		if nmapPort.State.State != "open" {
+		if nmapPort.State.State != "open" && nmapPort.State.State != "open|filtered" {
 			continue
 		}
 
-		svcInfo := domain.ServiceInfo{
-			Port:            int(nmapPort.ID),
-			Proto:           nmapPort.Protocol,
-			Service:         nmapPort.Service.Name,
-			Version:         nmapPort.Service.Version,
-			Banner:          buildBanner(nmapPort.Service),
-			Vulnerabilities: a.parseVulnersScript(nmapPort.Scripts),
+		portNum := int(nmapPort.ID)
+
+		// Take basic information from the input data
+		baseSvc, exists := servicesMap[portNum]
+		if !exists {
+			baseSvc = domain.ServiceInfo{Port: portNum, Proto: nmapPort.Protocol}
 		}
+
+		baseSvc.Service = nmapPort.Service.Name
+		baseSvc.Version = nmapPort.Service.Version
+		baseSvc.Banner = buildBanner(nmapPort.Service)
+		baseSvc.Vulnerabilities = a.parseVulnersScript(nmapPort.Scripts)
 
 		if len(nmapPort.Service.CPEs) > 0 {
-			svcInfo.CPE = string(nmapPort.Service.CPEs[0])
+			baseSvc.CPE = string(nmapPort.Service.CPEs[0])
 		}
 
-		enrichedServices = append(enrichedServices, svcInfo)
+		enrichedServices = append(enrichedServices, baseSvc)
+		delete(servicesMap, portNum)
+	}
+
+	// If Nmap missed a port that was previously discovered, add it back in "raw" form
+	for _, remainingSvc := range servicesMap {
+		a.logger.Warn("Nmap missed port, falling back to raw masscan data", "ip", host.IP, "port", remainingSvc.Port)
+		enrichedServices = append(enrichedServices, remainingSvc)
 	}
 
 	host.Services = enrichedServices

@@ -142,7 +142,11 @@ func (n *NotifierAdapter) buildMarkdownMessage(diff domain.ScanDiff) string {
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n")
 
 	for _, svc := range diff.NewServices {
-		fmt.Fprintf(&sb, "• *%d/%s* ➔ _%s_ ", svc.Port, escapeMarkdownV2(svc.Proto), escapeMarkdownV2(svc.Service))
+		svcName := svc.Service
+		if svcName == "" {
+			svcName = "unknown"
+		}
+		fmt.Fprintf(&sb, "• *%d/%s* ➔ _%s_ ", svc.Port, escapeMarkdownV2(svc.Proto), escapeMarkdownV2(svcName))
 		if svc.Version != "" {
 			fmt.Fprintf(&sb, "\\(_%s_\\)", escapeMarkdownV2(svc.Version))
 		}
