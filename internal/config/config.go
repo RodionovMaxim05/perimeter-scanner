@@ -8,10 +8,37 @@ import (
 	"perimeter-scanner/infrastructure/logger"
 )
 
+// Notification strategy constants control when scan diff alerts are dispatched.
+//
+// StrategyImmediate fires an alert for each enriched port result as it arrives,
+// before all ports for the host are collected. A host with N new open ports
+// produces up to N separate alerts.
+//
+// StrategyAggregated waits until all ports for a host are collected, then fires
+// a single alert combining every new service. A host with N new open ports
+// always produces exactly one alert.
+const (
+	StrategyImmediate  = "immediate"
+	StrategyAggregated = "aggregated"
+)
+
 // Application holds daemon-level settings that control scan scheduling and parallelism.
 type Application struct {
-	ScanInterval int `yaml:"scan_interval" env:"SCAN_INTERVAL" env-default:"300"` // seconds between scans
-	WorkerCount  int `yaml:"worker_count"  env:"WORKER_COUNT"  env-default:"10"`  // parallel enrichment workers
+	NotificationStrategy string `yaml:"notification_strategy" env:"NOTIFICATION_STRATEGY" env-default:"immediate"` // alert dispatch timing
+	ScanInterval         int    `yaml:"scan_interval"         env:"SCAN_INTERVAL"         env-default:"300"`       // seconds between scans
+	WorkerCount          int    `yaml:"worker_count"          env:"WORKER_COUNT"          env-default:"10"`        // parallel enrichment workers
+}
+
+// Validate returns an error if any Application field contains an invalid value.
+// Currently checks that NotificationStrategy is one of the declared constants.
+func (a Application) Validate() error {
+	switch a.NotificationStrategy {
+	case StrategyImmediate, StrategyAggregated:
+		return nil
+	default:
+		return fmt.Errorf("unknown notification strategy %q: allowed options are %q or %q",
+			a.NotificationStrategy, StrategyImmediate, StrategyAggregated)
+	}
 }
 
 // Scanner holds settings passed directly to the network scanning stage.
@@ -73,6 +100,10 @@ type Config struct {
 func MustLoad(path string) Config {
 	var cfg Config
 	env.MustLoad(path, &cfg)
+
+	if err := cfg.Application.Validate(); err != nil {
+		panic(fmt.Sprintf("invalid configuration: %v", err))
+	}
 
 	if cfg.Scanner.Interface == "" {
 		cfg.Scanner.Interface = GetActiveInterface()

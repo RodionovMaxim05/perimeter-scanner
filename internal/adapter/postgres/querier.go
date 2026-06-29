@@ -10,18 +10,17 @@ import (
 )
 
 type Querier interface {
-	// CreateHostScan inserts a new scan record for a host and returns its ID
-	CreateHostScan(ctx context.Context, arg CreateHostScanParams) (int32, error)
 	// CreateService inserts a discovered open port into a scan record
 	CreateService(ctx context.Context, arg CreateServiceParams) (int32, error)
-	// GetLastHostScan returns the most recent scan record for a given IP
-	GetLastHostScan(ctx context.Context, ip netip.Addr) (HostScan, error)
-	// GetServicesByScanID returns all open ports discovered during a specific scan
-	GetServicesByScanID(ctx context.Context, hostScanID int32) ([]ScanService, error)
+	DeleteServicesByScanID(ctx context.Context, hostScanID int32) error
+	// GetHostScanByIP returns the most recent scan record for a given IP
+	GetHostScanByIP(ctx context.Context, ip netip.Addr) (HostScan, error)
 	// GetServicesWithVulnerabilities returns all services with vulnerabilities
 	GetServicesWithVulnerabilities(ctx context.Context, hostScanID int32) ([]GetServicesWithVulnerabilitiesRow, error)
 	// LinkServiceVuln creates a many-to-many link between a service and a CVE
 	LinkServiceVuln(ctx context.Context, arg LinkServiceVulnParams) error
+	// UpsertHostScan inserts a new scan record for a host and returns its ID
+	UpsertHostScan(ctx context.Context, arg UpsertHostScanParams) (int32, error)
 	// UpsertVulnerability inserts a new CVE or updates it if it already exists
 	UpsertVulnerability(ctx context.Context, arg UpsertVulnerabilityParams) (int32, error)
 }

@@ -70,6 +70,7 @@ func run(ctx context.Context) error {
 		vulnersClient,
 		postgresClient,
 		telegramNotifier,
+		cfg.Application.NotificationStrategy,
 		cfg.Application.WorkerCount,
 		log,
 	)

@@ -28,7 +28,7 @@ func NewDBRepository(ctx context.Context, pool *pgxpool.Pool) (*RepositoryAdapte
 	}, nil
 }
 
-// GetPreviousResult returns the most recent scan result for the given IP.
+// GetPreviousResult returns the current persisted scan state for the given IP.
 // Returns (_, false, nil) when no previous scan exists for that host.
 func (ra *RepositoryAdapter) GetPreviousResult(ctx context.Context, ip string) (domain.HostScanResult, bool, error) {
 	parsedIP, err := netip.ParseAddr(ip)
@@ -36,12 +36,12 @@ func (ra *RepositoryAdapter) GetPreviousResult(ctx context.Context, ip string) (
 		return domain.HostScanResult{}, false, fmt.Errorf("invalid ip format: %w", err)
 	}
 
-	host, err := ra.queries.GetLastHostScan(ctx, parsedIP)
+	host, err := ra.queries.GetHostScanByIP(ctx, parsedIP)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.HostScanResult{}, false, nil
 		}
-		return domain.HostScanResult{}, false, fmt.Errorf("failed to get last host scan: %w", err)
+		return domain.HostScanResult{}, false, fmt.Errorf("failed to get host scan: %w", err)
 	}
 
 	rows, err := ra.queries.GetServicesWithVulnerabilities(ctx, host.ID)
@@ -97,7 +97,8 @@ func buildServicesFromRows(rows []GetServicesWithVulnerabilitiesRow) []domain.Se
 	return result
 }
 
-// SaveResult persists a full host scan result in a single transaction.
+// SaveResult persists a full host scan result, replacing any previous state for
+// the same IP in a single transaction.
 // Vulnerabilities are upserted so the catalog stays up-to-date when scores
 // change between scans.
 func (ra *RepositoryAdapter) SaveResult(ctx context.Context, result domain.HostScanResult) error {
@@ -116,12 +117,16 @@ func (ra *RepositoryAdapter) SaveResult(ctx context.Context, result domain.HostS
 
 	qtx := ra.queries.WithTx(tx)
 
-	hostScanID, err := qtx.CreateHostScan(ctx, CreateHostScanParams{
+	hostScanID, err := qtx.UpsertHostScan(ctx, UpsertHostScanParams{
 		Ip:       parsedIP,
 		ScanTime: pgtype.Timestamptz{Time: result.ScanTime, Valid: true},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create host scan: %w", err)
+	}
+
+	if err := qtx.DeleteServicesByScanID(ctx, hostScanID); err != nil {
+		return fmt.Errorf("failed to clear old services for host %s: %w", result.IP, err)
 	}
 
 	for _, svc := range result.Services {

@@ -12,25 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createHostScan = `-- name: CreateHostScan :one
-INSERT INTO host_scans (ip, scan_time)
-VALUES ($1, $2)
-RETURNING id
-`
-
-type CreateHostScanParams struct {
-	Ip       netip.Addr
-	ScanTime pgtype.Timestamptz
-}
-
-// CreateHostScan inserts a new scan record for a host and returns its ID
-func (q *Queries) CreateHostScan(ctx context.Context, arg CreateHostScanParams) (int32, error) {
-	row := q.db.QueryRow(ctx, createHostScan, arg.Ip, arg.ScanTime)
-	var id int32
-	err := row.Scan(&id)
-	return id, err
-}
-
 const createService = `-- name: CreateService :one
 INSERT INTO scan_services (
         host_scan_id,
@@ -71,65 +52,30 @@ func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (i
 	return id, err
 }
 
-const getLastHostScan = `-- name: GetLastHostScan :one
+const deleteServicesByScanID = `-- name: DeleteServicesByScanID :exec
+DELETE FROM scan_services
+WHERE host_scan_id = $1
+`
+
+func (q *Queries) DeleteServicesByScanID(ctx context.Context, hostScanID int32) error {
+	_, err := q.db.Exec(ctx, deleteServicesByScanID, hostScanID)
+	return err
+}
+
+const getHostScanByIP = `-- name: GetHostScanByIP :one
 SELECT id,
     ip,
     scan_time
 FROM host_scans
 WHERE ip = $1
-ORDER BY scan_time DESC
-LIMIT 1
 `
 
-// GetLastHostScan returns the most recent scan record for a given IP
-func (q *Queries) GetLastHostScan(ctx context.Context, ip netip.Addr) (HostScan, error) {
-	row := q.db.QueryRow(ctx, getLastHostScan, ip)
+// GetHostScanByIP returns the most recent scan record for a given IP
+func (q *Queries) GetHostScanByIP(ctx context.Context, ip netip.Addr) (HostScan, error) {
+	row := q.db.QueryRow(ctx, getHostScanByIP, ip)
 	var i HostScan
 	err := row.Scan(&i.ID, &i.Ip, &i.ScanTime)
 	return i, err
-}
-
-const getServicesByScanID = `-- name: GetServicesByScanID :many
-SELECT id,
-    host_scan_id,
-    port,
-    proto,
-    service,
-    banner,
-    version,
-    cpe
-FROM scan_services
-WHERE host_scan_id = $1
-`
-
-// GetServicesByScanID returns all open ports discovered during a specific scan
-func (q *Queries) GetServicesByScanID(ctx context.Context, hostScanID int32) ([]ScanService, error) {
-	rows, err := q.db.Query(ctx, getServicesByScanID, hostScanID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ScanService
-	for rows.Next() {
-		var i ScanService
-		if err := rows.Scan(
-			&i.ID,
-			&i.HostScanID,
-			&i.Port,
-			&i.Proto,
-			&i.Service,
-			&i.Banner,
-			&i.Version,
-			&i.Cpe,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const getServicesWithVulnerabilities = `-- name: GetServicesWithVulnerabilities :many
@@ -211,6 +157,27 @@ type LinkServiceVulnParams struct {
 func (q *Queries) LinkServiceVuln(ctx context.Context, arg LinkServiceVulnParams) error {
 	_, err := q.db.Exec(ctx, linkServiceVuln, arg.ServiceID, arg.VulnerabilityID)
 	return err
+}
+
+const upsertHostScan = `-- name: UpsertHostScan :one
+INSERT INTO host_scans (ip, scan_time)
+VALUES ($1, $2) ON CONFLICT (ip) DO
+UPDATE
+SET scan_time = EXCLUDED.scan_time
+RETURNING id
+`
+
+type UpsertHostScanParams struct {
+	Ip       netip.Addr
+	ScanTime pgtype.Timestamptz
+}
+
+// UpsertHostScan inserts a new scan record for a host and returns its ID
+func (q *Queries) UpsertHostScan(ctx context.Context, arg UpsertHostScanParams) (int32, error) {
+	row := q.db.QueryRow(ctx, upsertHostScan, arg.Ip, arg.ScanTime)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const upsertVulnerability = `-- name: UpsertVulnerability :one
