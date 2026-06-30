@@ -21,9 +21,17 @@ The system operates as a unified multi-threaded pipeline. Below is the UML Activ
 
 ## Alert Example
 
-Below is an example of a consolidated real-time notification sent to Telegram when new services or exploitable vulnerabilities are exposed on the perimeter:
+Below is an example of a consolidated real-time notification sent to `Telegram` when new services or exploitable vulnerabilities are exposed on the perimeter:
 
 ![Telegram Alert Example](figures/telegram_alert.png)
+
+## Dashboard
+
+The project ships with a pre-provisioned `Grafana` dashboard for monitoring scan results, open ports, discovered services, and exploitable vulnerabilities in real time. It is automatically loaded on startup via the `config/grafana` provisioning files and set as the default home dashboard.
+
+Once the stack is running, open [http://localhost:3000](http://localhost:3000) in your browser. Default credentials are `admin` / `admin` (you will be prompted to change the password on first login, or you can set a custom one via `GRAFANA_PASSWORD` in `.env`).
+
+![Grafana Dashboard](figures/grafana_dashboard.png)
 
 ## Requirements
 
