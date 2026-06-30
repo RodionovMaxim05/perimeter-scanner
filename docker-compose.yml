@@ -29,6 +29,8 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - monitoring
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 2s
@@ -48,5 +50,31 @@ services:
       postgres:
         condition: service_healthy
 
+  grafana:
+    image: grafana/grafana:latest
+    container_name: perimeter-grafana
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/perimeter.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    networks:
+      - monitoring
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+networks:
+  monitoring:
+    driver: bridge
+
 volumes:
   pgdata:
+  grafana_data:
