@@ -37,7 +37,7 @@ func testLogger(t *testing.T) *slog.Logger {
 
 // Helpers
 
-func newScannerUseCase(t *testing.T, repo *postgresrepo.RepositoryAdapter, notifier domain.AlertNotifier, strategy string) *usecase.ScannerUseCase {
+func newScannerUseCase(t *testing.T, repo *postgresrepo.RepositoryAdapter, notifier usecase.AlertNotifier, strategy string) *usecase.ScannerUseCase {
 	t.Helper()
 	return usecase.NewScannerUseCase(
 		masscan.NewScannerAdapter("masscan", 1000, config.GetActiveInterface(), testLogger(t)),
