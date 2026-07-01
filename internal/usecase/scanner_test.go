@@ -17,11 +17,11 @@ import (
 func newLogger() *slog.Logger { return slog.New(slog.NewTextHandler(os.Stderr, nil)) }
 
 func newUC(
-	scanner domain.NetworkScanner,
-	enricher domain.ServiceEnricher,
-	exploitChecker domain.ExploitChecker,
-	repo domain.ResultRepository,
-	notifier domain.AlertNotifier,
+	scanner NetworkScanner,
+	enricher ServiceEnricher,
+	exploitChecker ExploitChecker,
+	repo ResultRepository,
+	notifier AlertNotifier,
 	notify_strategy string,
 	workers int,
 ) *ScannerUseCase {

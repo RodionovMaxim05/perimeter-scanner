@@ -18,13 +18,13 @@ import (
 // All stages are pipelined and streaming: enrichment workers start processing
 // hosts as soon as the scanner emits them, without waiting for the full scan to finish.
 type ScannerUseCase struct {
-	scanner               domain.NetworkScanner   // fast port discovery
-	enricher              domain.ServiceEnricher  // deep service fingerprinting and CVE lookup
-	exploitChecker        domain.ExploitChecker   // exploit availability lookup
-	repo                  domain.ResultRepository // persistence layer
-	notifier              domain.AlertNotifier    // alert delivery
-	notification_strategy string                  // config.StrategyImmediate or config.StrategyAggregated
-	workerCount           int                     // number of parallel enrichment workers
+	scanner               NetworkScanner   // fast port discovery
+	enricher              ServiceEnricher  // deep service fingerprinting and CVE lookup
+	exploitChecker        ExploitChecker   // exploit availability lookup
+	repo                  ResultRepository // persistence layer
+	notifier              AlertNotifier    // alert delivery
+	notification_strategy string           // config.StrategyImmediate or config.StrategyAggregated
+	workerCount           int              // number of parallel enrichment workers
 	logger                *slog.Logger
 }
 
@@ -32,11 +32,11 @@ type ScannerUseCase struct {
 // workerCount controls how many Nmap enrichment workers run in parallel.
 // notification_strategy must be one of the constants defined in the config package.
 func NewScannerUseCase(
-	scanner domain.NetworkScanner,
-	enricher domain.ServiceEnricher,
-	exploitChecker domain.ExploitChecker,
-	repo domain.ResultRepository,
-	notifier domain.AlertNotifier,
+	scanner NetworkScanner,
+	enricher ServiceEnricher,
+	exploitChecker ExploitChecker,
+	repo ResultRepository,
+	notifier AlertNotifier,
 	notification_strategy string,
 	workerCount int,
 	logger *slog.Logger,

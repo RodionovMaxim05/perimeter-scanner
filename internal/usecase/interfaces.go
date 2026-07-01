@@ -1,19 +1,23 @@
-package domain
+package usecase
 
-import "context"
+import (
+	"context"
+
+	"perimeter-scanner/internal/domain"
+)
 
 // NetworkScanner defines a contract for the primary fast scan.
 type NetworkScanner interface {
 	// Scan triggers an asynchronous scan over targets and ports.
 	// It streams discovered hosts through a results channel and emits any terminal
 	// execution error via an error channel.
-	Scan(ctx context.Context, targets []string, ports string) (<-chan HostScanResult, <-chan error)
+	Scan(ctx context.Context, targets []string, ports string) (<-chan domain.HostScanResult, <-chan error)
 }
 
 // ServiceEnricher defines a contract for deep port analysis.
 type ServiceEnricher interface {
 	// Enrich takes bare host ports and enriches them (versions, banners, CPEs, vulnerabilities).
-	Enrich(ctx context.Context, host *HostScanResult) error
+	Enrich(ctx context.Context, host *domain.HostScanResult) error
 }
 
 // ExploitChecker defines a contract for checking public exploit availability for a CVE.
@@ -26,13 +30,13 @@ type ExploitChecker interface {
 // ResultRepository is responsible for storing history and retrieving past results.
 type ResultRepository interface {
 	// GetPreviousResult returns history by IP. If there is no data, it returns (_, false, nil).
-	GetPreviousResult(ctx context.Context, ip string) (HostScanResult, bool, error)
+	GetPreviousResult(ctx context.Context, ip string) (domain.HostScanResult, bool, error)
 	// SaveResult saves the current state of the host.
-	SaveResult(ctx context.Context, result HostScanResult) error
+	SaveResult(ctx context.Context, result domain.HostScanResult) error
 }
 
 // AlertNotifier is responsible for sending notifications about new threats.
 type AlertNotifier interface {
 	// SendDiffAlert sends information about discovered ports/CVEs to the owner.
-	SendDiffAlert(ctx context.Context, diff ScanDiff) error
+	SendDiffAlert(ctx context.Context, diff domain.ScanDiff) error
 }

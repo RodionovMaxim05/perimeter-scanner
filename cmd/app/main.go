@@ -17,7 +17,6 @@ import (
 	"perimeter-scanner/internal/adapter/telegram"
 	"perimeter-scanner/internal/adapter/vulners"
 	"perimeter-scanner/internal/config"
-	"perimeter-scanner/internal/domain"
 	"perimeter-scanner/internal/usecase"
 )
 
@@ -38,7 +37,7 @@ func run(ctx context.Context) error {
 
 	masscanScanner := masscan.NewScannerAdapter(cfg.Scanner.BinaryPath, cfg.Scanner.Rate, cfg.Scanner.Interface, log)
 	nmapEnricher := nmap.NewEnricherAdapter(log)
-	var vulnersClient domain.ExploitChecker
+	var vulnersClient usecase.ExploitChecker
 	if cfg.Vulners.APIKey != "" {
 		vulnersClient = vulners.NewExploitCheckerAdapter(cfg.Vulners.APIKey)
 	} else {
